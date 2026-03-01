@@ -42,14 +42,14 @@ jobs:
           VERSION=${{ steps.version.outputs.version }} ./scripts/build-packages.sh rpm
 
       - name: Upload RPM artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rpm-packages
           path: build/output/*.rpm
           retention-days: 5
 
       - name: Upload RPM checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rpm-checksums
           path: build/output/*.rpm.sha256
@@ -80,14 +80,14 @@ jobs:
           VERSION=${{ steps.version.outputs.version }} ./scripts/build-packages.sh deb
 
       - name: Upload DEB artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deb-packages
           path: build/output/*.deb
           retention-days: 5
 
       - name: Upload DEB checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deb-checksums
           path: build/output/*.deb.sha256
@@ -122,14 +122,14 @@ jobs:
           VERSION=${{ steps.version.outputs.version }} OPENVOX_SERVE_FRONTEND=true ./scripts/build-packages.sh binary
 
       - name: Upload binary tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binary-tarball
           path: build/output/*.tar.gz
           retention-days: 5
 
       - name: Upload binary checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binary-checksums
           path: build/output/*.tar.gz.sha256
@@ -154,14 +154,14 @@ jobs:
           VERSION=${{ steps.version.outputs.version }} ./scripts/build-packages.sh source
 
       - name: Upload source tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: source-tarball
           path: build/source/*.tar.gz
           retention-days: 5
 
       - name: Upload source checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: source-checksums
           path: build/source/*.tar.gz.sha256
