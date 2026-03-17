@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bootstrap script now detects and works around broken Vox Pupuli release packages that create invalid APT sources
 - Bootstrap script now cleans up existing broken openvox repository configurations before attempting fresh install
 - Bootstrap script now disables automatic service restarts during package installation (needrestart)
+- Classification rule inline editing now keeps the current rule values visible when opening the edit form
 
 ## [0.22.0] - 2025-01-15
 

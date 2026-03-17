@@ -990,18 +990,18 @@ export default function Groups() {
                         >
                           {editingRuleId === rule.id ? (
                             /* Editing mode */
-                            <div className="flex-1 flex items-center gap-2">
+                            <div className="flex-1 flex flex-wrap items-center gap-2">
                               <input
                                 type="text"
                                 value={editingRuleFactPath}
                                 onChange={(e) => setEditingRuleFactPath(e.target.value)}
-                                className="input flex-1 text-sm font-mono"
+                                className="input min-w-0 flex-[2_1_16rem] text-sm font-mono"
                                 placeholder="Fact path (e.g., os.family)"
                               />
                               <select
                                 value={editingRuleOperator}
                                 onChange={(e) => setEditingRuleOperator(e.target.value as RuleOperator)}
-                                className="input text-sm"
+                                className="input w-28 shrink-0 text-sm"
                               >
                                 {RULE_OPERATORS.map((op) => (
                                   <option key={op.value} value={op.value}>
@@ -1013,7 +1013,7 @@ export default function Groups() {
                                 type="text"
                                 value={editingRuleValue}
                                 onChange={(e) => setEditingRuleValue(e.target.value)}
-                                className="input flex-1 text-sm"
+                                className="input min-w-0 flex-[2_1_16rem] text-sm"
                                 placeholder="Value"
                               />
                               <button
