@@ -4,7 +4,9 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use printpdf::{BuiltinFont, Mm, Op, PdfDocument, PdfPage, PdfSaveOptions, Pt, TextItem};
+use printpdf::{
+    BuiltinFont, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Pt, TextItem,
+};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -674,6 +676,7 @@ impl ReportingService {
 
         // Build page operations
         let mut ops = Vec::new();
+        ops.push(Op::StartTextSection);
 
         // Title - position at top of page (A4: 210mm x 297mm)
         ops.push(Op::SetTextCursor {
@@ -682,9 +685,13 @@ impl ReportingService {
                 y: Pt::from(Mm(280.0)),
             },
         });
-        ops.push(Op::WriteTextBuiltinFont {
+        ops.push(Op::SetFont {
+            font: PdfFontHandle::Builtin(font_bold),
+            size: Pt(16.0),
+        });
+        ops.push(Op::SetLineHeight { lh: Pt(16.0) });
+        ops.push(Op::ShowText {
             items: vec![TextItem::Text(title.to_string())],
-            font: font_bold,
         });
 
         // Content - split by lines and render
@@ -717,14 +724,22 @@ impl ReportingService {
                         y: Pt::from(Mm(y_pos)),
                     },
                 });
-                ops.push(Op::WriteTextBuiltinFont {
+                ops.push(Op::SetFont {
+                    font: PdfFontHandle::Builtin(font_to_use),
+                    size: Pt(if is_heading { 12.0 } else { 10.0 }),
+                });
+                ops.push(Op::SetLineHeight {
+                    lh: Pt(if is_heading { 12.0 } else { 10.0 }),
+                });
+                ops.push(Op::ShowText {
                     items: vec![TextItem::Text(display_line.to_string())],
-                    font: font_to_use,
                 });
             }
 
             y_pos -= line_height;
         }
+
+        ops.push(Op::EndTextSection);
 
         // Create A4 page with operations
         let page = PdfPage::new(Mm(210.0), Mm(297.0), ops);
