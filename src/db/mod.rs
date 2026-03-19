@@ -12,6 +12,7 @@ pub mod api_key_repository;
 pub mod audit_repository;
 pub mod backup_repository;
 pub mod code_deploy_repository;
+pub mod inventory_repository;
 pub mod migrations;
 pub mod node_removal_repository;
 pub mod organization_repository;
@@ -29,6 +30,7 @@ pub use code_deploy_repository::{
     CodeDeploymentRepository, CodeEnvironmentRepository, CodePatTokenRepository,
     CodeRepositoryRepository, CodeSshKeyRepository,
 };
+pub use inventory_repository::InventoryRepository;
 pub use node_removal_repository::NodeRemovalRepository;
 pub use organization_repository::OrganizationRepository;
 pub use settings_repository::SettingsRepository;
@@ -38,7 +40,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
-    Pool, Sqlite, Row,
+    Pool, Row, Sqlite,
 };
 use tracing::{error, info};
 
@@ -85,6 +87,18 @@ const REQUIRED_TABLES: &[&str] = &[
     "node_removal_audit",
     // Settings table
     "settings",
+    // Phase 10 inventory tables
+    "host_inventory_snapshots",
+    "host_os_inventory",
+    "host_package_inventory",
+    "host_application_inventory",
+    "host_web_inventory",
+    "host_runtime_inventory",
+    "repository_version_catalog",
+    "host_update_status",
+    "update_jobs",
+    "update_job_targets",
+    "update_job_results",
 ];
 
 /// Database connection pool type

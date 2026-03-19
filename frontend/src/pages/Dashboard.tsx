@@ -6,6 +6,8 @@ import {
   Pie,
   Cell,
   ResponsiveContainer,
+  BarChart,
+  Bar,
   LineChart,
   Line,
   XAxis,
@@ -102,6 +104,16 @@ export default function Dashboard() {
   const { data: reports = [], isLoading: reportsLoading, refetch: refetchReports } = useQuery({
     queryKey: ['reports', { limit: 20 }],
     queryFn: () => api.getReports({ limit: 20 }),
+  });
+
+  const {
+    data: inventoryDashboard,
+    isLoading: inventoryLoading,
+    refetch: refetchInventory,
+  } = useQuery({
+    queryKey: ['inventory-dashboard'],
+    queryFn: api.getInventoryDashboard,
+    retry: false,
   });
 
   // Calculate stats from real node data
@@ -229,11 +241,55 @@ export default function Dashboard() {
     },
   ];
 
-  const isLoading = nodesLoading || reportsLoading;
+  const inventorySummary = inventoryDashboard?.summary;
+  const inventoryComplianceData = inventoryDashboard?.update_compliance ?? [];
+  const patchAgeData = inventoryDashboard?.patch_age_buckets ?? [];
+  const platformDistribution = inventoryDashboard?.platform_distribution ?? [];
+  const osDistribution = inventoryDashboard?.os_distribution ?? [];
+  const topOutdatedSoftware = inventoryDashboard?.top_outdated_software ?? [];
+
+  const inventoryStatsCards = [
+    {
+      name: 'Inventory Coverage',
+      value: inventorySummary?.nodes_with_inventory ?? 0,
+      subtitle: `${inventorySummary?.total_nodes ?? 0} reporting nodes`,
+      icon: Server,
+      color: 'text-primary-600',
+      bg: 'bg-primary-50',
+    },
+    {
+      name: 'Outdated Nodes',
+      value: inventorySummary?.outdated_nodes ?? 0,
+      subtitle: `${inventorySummary?.outdated_packages ?? 0} packages, ${inventorySummary?.outdated_applications ?? 0} apps`,
+      icon: AlertCircle,
+      color: 'text-warning-500',
+      bg: 'bg-warning-50',
+    },
+    {
+      name: 'Stale Inventory',
+      value: inventorySummary?.stale_nodes ?? 0,
+      subtitle: 'Needs a fresh submission',
+      icon: Clock,
+      color: 'text-danger-500',
+      bg: 'bg-danger-50',
+    },
+    {
+      name: 'Up To Date',
+      value:
+        (inventoryComplianceData.find((entry) => entry.label === 'Compliant')?.value ?? 0),
+      subtitle: 'Fresh nodes with no detected drift',
+      icon: CheckCircle,
+      color: 'text-success-500',
+      bg: 'bg-success-50',
+    },
+  ];
+
+  const isLoading = nodesLoading || reportsLoading || inventoryLoading;
 
   const handleRefresh = () => {
     refetchNodes();
     refetchReports();
+    refetchInventory();
   };
 
   if (isLoading) {
@@ -366,6 +422,152 @@ export default function Dashboard() {
                 />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Inventory Compliance</h2>
+          <p className="text-sm text-gray-500">
+            {inventorySummary
+              ? `Generated ${formatTimeAgo(inventorySummary.generated_at)}`
+              : 'No inventory analytics yet'}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
+          {inventoryStatsCards.map((stat) => (
+            <div key={stat.name} className="card">
+              <div className="flex items-center">
+                <div className={`p-3 rounded-lg ${stat.bg}`}>
+                  <stat.icon className={`w-6 h-6 ${stat.color}`} />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500">{stat.name}</p>
+                  <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                  <p className="text-xs text-gray-500 mt-1">{stat.subtitle}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
+          <div className="card">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Update Compliance</h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={inventoryComplianceData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {inventoryComplianceData.map((entry, index) => (
+                      <Cell
+                        key={`inventory-compliance-${index}`}
+                        fill={
+                          entry.label === 'Compliant'
+                            ? '#22c55e'
+                            : entry.label === 'Outdated'
+                            ? '#f59e0b'
+                            : '#ef4444'
+                        }
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="card xl:col-span-2">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Patch Age</h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={patchAgeData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="label" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="card">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Platform Distribution</h3>
+            <div className="space-y-3">
+              {platformDistribution.length === 0 ? (
+                <p className="text-sm text-gray-500">No inventory distribution data available.</p>
+              ) : (
+                platformDistribution.map((entry) => (
+                  <div key={entry.label}>
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <span className="text-gray-700">{entry.label}</span>
+                      <span className="font-medium text-gray-900">{entry.value}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary-500"
+                        style={{
+                          width: `${inventorySummary?.total_nodes ? (entry.value / inventorySummary.total_nodes) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Top OS Versions</h3>
+            <div className="space-y-3">
+              {osDistribution.length === 0 ? (
+                <p className="text-sm text-gray-500">No OS version data available.</p>
+              ) : (
+                osDistribution.map((entry) => (
+                  <div key={entry.label} className="flex items-center justify-between gap-4">
+                    <span className="text-sm text-gray-700">{entry.label}</span>
+                    <span className="text-sm font-medium text-gray-900">{entry.value}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Outdated Software</h3>
+            <div className="space-y-3">
+              {topOutdatedSoftware.length === 0 ? (
+                <p className="text-sm text-gray-500">No outdated software detected.</p>
+              ) : (
+                topOutdatedSoftware.map((item) => (
+                  <div key={`${item.software_type}-${item.name}`} className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{item.name}</p>
+                      <p className="text-xs uppercase tracking-wide text-gray-400">
+                        {item.software_type}
+                      </p>
+                    </div>
+                    <span className="text-sm font-medium text-gray-900">
+                      {item.affected_nodes} nodes
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>

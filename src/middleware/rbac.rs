@@ -173,6 +173,7 @@ pub fn check_permission(
 /// use openvox_webui::models::Resource;
 /// use openvox_webui::middleware::rbac::RequirePermission;
 /// use openvox_webui::{DbRbacService, RbacService};
+/// use openvox_webui::services::notification::NotificationService;
 ///
 /// # tokio_test::block_on(async {
 /// async fn list_nodes() -> &'static str { "ok" }
@@ -196,15 +197,20 @@ pub fn check_permission(
 ///     cache: CacheConfig::default(),
 ///     dashboard: DashboardConfig::default(),
 ///     rbac: RbacConfig::default(),
+///     classification: None,
 ///     groups_config_path: None,
 ///     code_deploy: None,
+///     inventory: None,
 ///     saml: None,
+///     backup: None,
+///     node_removal: None,
+///     node_bootstrap: None,
 /// };
 ///
 /// let db = openvox_webui::db::init_pool(&config.database).await.unwrap();
 /// let state = AppState {
 ///     config,
-///     db,
+///     db: db.clone(),
 ///     puppetdb: None,
 ///     puppet_ca: None,
 ///     rbac: Arc::new(RbacService::new()),
@@ -215,6 +221,8 @@ pub fn check_permission(
 ///             connect_timeout_secs: 30, idle_timeout_secs: 600,
 ///         }).await.unwrap())),
 ///     code_deploy_config: None,
+///     backup_config: None,
+///     notification_service: Arc::new(NotificationService::new(db.clone())),
 /// };
 ///
 /// let app = Router::<AppState>::new()

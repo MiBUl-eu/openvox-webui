@@ -116,7 +116,32 @@ After configuring the client, these facts become available:
 - `$facts['openvox_classes']` - Hash of classes with their parameters
 - `$facts['openvox_variables']` - Variables defined in matched groups
 - `$facts['openvox_environment']` - Classified environment name
+- `$facts['openvox_inventory_status']` - Inventory collection/submission summary when inventory is enabled
 - Top-level facts for each variable (e.g., `$facts['role']`, `$facts['datacenter']`)
+
+#### Inventory Collection
+
+Phase 10.2 adds opt-in inventory collectors to the Puppet client class. When enabled, the agent gathers:
+
+- Linux RPM/DEB package inventory
+- Windows installed applications and IIS sites
+- macOS app bundles and Homebrew inventory
+- Apache and NGINX website discovery
+- Tomcat and JBoss/WildFly runtime discovery
+
+Example:
+
+```puppet
+class { 'openvox_webui::client':
+  api_url            => 'https://openvox.example.com:5051',
+  use_puppet_certs   => true,
+  inventory_enabled  => true,
+  inventory_submit   => true,
+  inventory_max_items => 1000,
+}
+```
+
+The client posts inventory snapshots to `/api/v1/nodes/{certname}/inventory` using the same authentication model as classification.
 
 #### Classification Options
 

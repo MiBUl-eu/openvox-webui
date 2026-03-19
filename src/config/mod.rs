@@ -51,6 +51,9 @@ pub struct AppConfig {
     /// Classification endpoint configuration
     #[serde(default)]
     pub classification: Option<ClassificationConfig>,
+    /// Inventory intelligence and scheduled update evaluation
+    #[serde(default)]
+    pub inventory: Option<InventoryConfig>,
 }
 
 /// Server configuration
@@ -185,7 +188,10 @@ impl PuppetDbConfig {
 
     /// Get the effective SSL verify setting (checks nested config first, then flat)
     pub fn effective_ssl_verify(&self) -> bool {
-        self.ssl.as_ref().map(|s| s.verify).unwrap_or(self.ssl_verify)
+        self.ssl
+            .as_ref()
+            .map(|s| s.verify)
+            .unwrap_or(self.ssl_verify)
     }
 }
 
@@ -262,7 +268,10 @@ impl PuppetCAConfig {
 
     /// Get the effective SSL verify setting (checks nested config first, then flat)
     pub fn effective_ssl_verify(&self) -> bool {
-        self.ssl.as_ref().map(|s| s.verify).unwrap_or(self.ssl_verify)
+        self.ssl
+            .as_ref()
+            .map(|s| s.verify)
+            .unwrap_or(self.ssl_verify)
     }
 }
 
@@ -1162,6 +1171,42 @@ pub struct ClassificationConfig {
     pub shared_key: Option<String>,
 }
 
+/// Inventory/version intelligence configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct InventoryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_inventory_catalog_refresh_interval_secs")]
+    pub catalog_refresh_interval_secs: u64,
+    #[serde(default = "default_inventory_status_refresh_interval_secs")]
+    pub status_refresh_interval_secs: u64,
+    #[serde(default = "default_inventory_stale_after_hours")]
+    pub stale_after_hours: i64,
+}
+
+fn default_inventory_catalog_refresh_interval_secs() -> u64 {
+    1800
+}
+
+fn default_inventory_status_refresh_interval_secs() -> u64 {
+    900
+}
+
+fn default_inventory_stale_after_hours() -> i64 {
+    48
+}
+
+impl Default for InventoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            catalog_refresh_interval_secs: default_inventory_catalog_refresh_interval_secs(),
+            status_refresh_interval_secs: default_inventory_status_refresh_interval_secs(),
+            stale_after_hours: default_inventory_stale_after_hours(),
+        }
+    }
+}
+
 impl Default for NodeBootstrapConfig {
     fn default() -> Self {
         Self {
@@ -1315,6 +1360,7 @@ impl Default for AppConfig {
             node_removal: None,
             node_bootstrap: None,
             classification: None,
+            inventory: None,
         }
     }
 }
@@ -1360,7 +1406,10 @@ impl AppConfig {
 
                 parsed
             } else {
-                eprintln!("[CONFIG] Config file path exists but file not found: {:?}", path);
+                eprintln!(
+                    "[CONFIG] Config file path exists but file not found: {:?}",
+                    path
+                );
                 AppConfig::default()
             }
         } else {
@@ -1558,7 +1607,9 @@ impl AppConfig {
         // Code Deploy overrides
         if let Ok(enabled) = std::env::var("CODE_DEPLOY_ENABLED") {
             if enabled.to_lowercase() == "true" || enabled == "1" {
-                let code_deploy = self.code_deploy.get_or_insert_with(CodeDeployYamlConfig::default);
+                let code_deploy = self
+                    .code_deploy
+                    .get_or_insert_with(CodeDeployYamlConfig::default);
                 code_deploy.enabled = true;
             }
         }
@@ -1720,21 +1771,29 @@ impl AppConfig {
         if let Ok(url) = std::env::var("NODE_BOOTSTRAP_OPENVOX_SERVER_URL")
             .or_else(|_| std::env::var("NODE_BOOTSTRAP_PUPPET_SERVER_URL"))
         {
-            let bootstrap = self.node_bootstrap.get_or_insert_with(NodeBootstrapConfig::default);
+            let bootstrap = self
+                .node_bootstrap
+                .get_or_insert_with(NodeBootstrapConfig::default);
             bootstrap.openvox_server_url = Some(url);
         }
         if let Ok(url) = std::env::var("NODE_BOOTSTRAP_REPOSITORY_BASE_URL") {
-            let bootstrap = self.node_bootstrap.get_or_insert_with(NodeBootstrapConfig::default);
+            let bootstrap = self
+                .node_bootstrap
+                .get_or_insert_with(NodeBootstrapConfig::default);
             bootstrap.repository_base_url = Some(url);
         }
         if let Ok(name) = std::env::var("NODE_BOOTSTRAP_AGENT_PACKAGE_NAME") {
-            let bootstrap = self.node_bootstrap.get_or_insert_with(NodeBootstrapConfig::default);
+            let bootstrap = self
+                .node_bootstrap
+                .get_or_insert_with(NodeBootstrapConfig::default);
             bootstrap.agent_package_name = name;
         }
 
         // Classification endpoint overrides
         if let Ok(key) = std::env::var("CLASSIFICATION_SHARED_KEY") {
-            let classification = self.classification.get_or_insert_with(ClassificationConfig::default);
+            let classification = self
+                .classification
+                .get_or_insert_with(ClassificationConfig::default);
             classification.shared_key = Some(key);
         }
     }
@@ -1759,16 +1818,10 @@ impl AppConfig {
         // Validate TLS configuration if present
         if let Some(ref tls) = self.server.tls {
             if !tls.cert_file.exists() {
-                anyhow::bail!(
-                    "TLS certificate file not found: {:?}",
-                    tls.cert_file
-                );
+                anyhow::bail!("TLS certificate file not found: {:?}", tls.cert_file);
             }
             if !tls.key_file.exists() {
-                anyhow::bail!(
-                    "TLS key file not found: {:?}",
-                    tls.key_file
-                );
+                anyhow::bail!("TLS key file not found: {:?}", tls.key_file);
             }
             if tls.min_version != "1.2" && tls.min_version != "1.3" {
                 anyhow::bail!(

@@ -1,0 +1,220 @@
+//! Inventory analytics and version intelligence endpoints.
+
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use serde::Deserialize;
+use uuid::Uuid;
+
+use crate::{
+    db::{repository::GroupRepository, InventoryRepository},
+    middleware::AuthUser,
+    models::{
+        ApproveUpdateJobRequest, CreateUpdateJobRequest, InventoryDashboardReport,
+        InventoryFleetStatusSummary, RepositoryVersionCatalogEntry, UpdateJob,
+    },
+    utils::error::{AppError, AppResult},
+    AppState,
+};
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/updates", get(list_update_jobs).post(create_update_job))
+        .route("/updates/{job_id}", get(get_update_job))
+        .route("/updates/{job_id}/approve", post(approve_update_job))
+        .route("/dashboard", get(get_inventory_dashboard))
+        .route("/summary", get(get_inventory_summary))
+        .route("/catalog", get(list_version_catalog))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CatalogQuery {
+    pub software_type: Option<String>,
+    pub platform_family: Option<String>,
+    pub distribution: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateJobsQuery {
+    pub limit: Option<usize>,
+}
+
+fn require_inventory_update_read(auth_user: &AuthUser) -> AppResult<()> {
+    if auth_user.is_super_admin()
+        || auth_user
+            .roles
+            .iter()
+            .any(|role| role == "admin" || role == "operator" || role == "viewer")
+    {
+        Ok(())
+    } else {
+        Err(AppError::forbidden(
+            "Insufficient permissions for inventory update operations",
+        ))
+    }
+}
+
+fn require_inventory_update_write(auth_user: &AuthUser) -> AppResult<()> {
+    if auth_user.is_super_admin()
+        || auth_user
+            .roles
+            .iter()
+            .any(|role| role == "admin" || role == "operator")
+    {
+        Ok(())
+    } else {
+        Err(AppError::forbidden(
+            "Insufficient permissions to manage inventory update jobs",
+        ))
+    }
+}
+
+async fn get_inventory_summary(
+    State(state): State<AppState>,
+) -> AppResult<Json<InventoryFleetStatusSummary>> {
+    let repo = InventoryRepository::new(state.db.clone());
+    let summary = repo
+        .get_fleet_status_summary()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch inventory summary: {}", e)))?;
+
+    Ok(Json(summary))
+}
+
+async fn get_inventory_dashboard(
+    State(state): State<AppState>,
+) -> AppResult<Json<InventoryDashboardReport>> {
+    let repo = InventoryRepository::new(state.db.clone());
+    let report = repo
+        .get_dashboard_report()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch inventory dashboard: {}", e)))?;
+
+    Ok(Json(report))
+}
+
+async fn list_version_catalog(
+    State(state): State<AppState>,
+    Query(query): Query<CatalogQuery>,
+) -> AppResult<Json<Vec<RepositoryVersionCatalogEntry>>> {
+    let repo = InventoryRepository::new(state.db.clone());
+    let mut entries = repo
+        .list_version_catalog()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch version catalog: {}", e)))?;
+
+    if let Some(ref software_type) = query.software_type {
+        entries.retain(|entry| entry.software_type == *software_type);
+    }
+    if let Some(ref platform_family) = query.platform_family {
+        entries.retain(|entry| entry.platform_family == *platform_family);
+    }
+    if let Some(ref distribution) = query.distribution {
+        entries.retain(|entry| entry.distribution == *distribution);
+    }
+
+    Ok(Json(entries))
+}
+
+async fn list_update_jobs(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Query(query): Query<UpdateJobsQuery>,
+) -> AppResult<Json<Vec<UpdateJob>>> {
+    require_inventory_update_read(&auth_user)?;
+
+    let repo = InventoryRepository::new(state.db.clone());
+    let jobs = repo
+        .list_update_jobs(query.limit.unwrap_or(50).min(200))
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch update jobs: {}", e)))?;
+
+    Ok(Json(jobs))
+}
+
+async fn get_update_job(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(job_id): Path<String>,
+) -> AppResult<Json<UpdateJob>> {
+    require_inventory_update_read(&auth_user)?;
+
+    let repo = InventoryRepository::new(state.db.clone());
+    let job = repo
+        .get_update_job(&job_id)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch update job: {}", e)))?
+        .ok_or_else(|| AppError::NotFound(format!("Update job '{}' not found", job_id)))?;
+
+    Ok(Json(job))
+}
+
+async fn create_update_job(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Json(payload): Json<CreateUpdateJobRequest>,
+) -> AppResult<(StatusCode, Json<UpdateJob>)> {
+    require_inventory_update_write(&auth_user)?;
+
+    let mut certnames = payload.certnames.clone();
+    if let Some(group_id) = payload.group_id.as_deref() {
+        let group_uuid = Uuid::parse_str(group_id)
+            .map_err(|_| AppError::bad_request("group_id must be a valid UUID"))?;
+        let group_repo = GroupRepository::new(&state.db);
+        let mut group_nodes = group_repo
+            .get_group_nodes(group_uuid)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to resolve target group: {}", e)))?;
+        certnames.append(&mut group_nodes);
+    }
+
+    certnames.sort();
+    certnames.dedup();
+    certnames.retain(|certname| !certname.trim().is_empty());
+
+    if certnames.is_empty() {
+        return Err(AppError::bad_request(
+            "At least one target node or a non-empty group is required",
+        ));
+    }
+
+    let repo = InventoryRepository::new(state.db.clone());
+    let job = repo
+        .create_update_job(
+            payload.operation_type,
+            &payload.package_names,
+            payload.group_id.as_deref(),
+            &certnames,
+            payload.requires_approval,
+            payload.scheduled_for,
+            payload.maintenance_window_start,
+            payload.maintenance_window_end,
+            &auth_user.username,
+            payload.approval_notes.as_deref(),
+        )
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to create update job: {}", e)))?;
+
+    Ok((StatusCode::CREATED, Json(job)))
+}
+
+async fn approve_update_job(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(job_id): Path<String>,
+    Json(payload): Json<ApproveUpdateJobRequest>,
+) -> AppResult<Json<UpdateJob>> {
+    require_inventory_update_write(&auth_user)?;
+
+    let repo = InventoryRepository::new(state.db.clone());
+    let job = repo
+        .approve_update_job(&job_id, payload.approved, &auth_user.username, payload.notes.as_deref())
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to update job approval state: {}", e)))?
+        .ok_or_else(|| AppError::NotFound(format!("Update job '{}' not found", job_id)))?;
+
+    Ok(Json(job))
+}

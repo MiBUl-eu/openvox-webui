@@ -55,6 +55,15 @@
 #   This is an alternative to mTLS client certificate authentication.
 #   Must match the key configured on the OpenVox WebUI server.
 #
+# @param inventory_enabled
+#   Whether to collect and submit application/package inventory to OpenVox WebUI.
+#
+# @param inventory_submit
+#   Whether collected inventory should be posted back to the WebUI API.
+#
+# @param inventory_max_items
+#   Maximum number of records collected per inventory category to avoid oversized payloads.
+#
 # @example Basic usage with Puppet certificates (recommended)
 #   class { 'openvox_webui::client':
 #     api_url          => 'https://openvox.example.com:5051',
@@ -94,6 +103,9 @@ class openvox_webui::client (
   String[1]                           $template_name      = 'classification',
   Boolean                             $manage_config      = true,
   Optional[String[1]]                 $classification_key = undef,
+  Boolean                             $inventory_enabled  = false,
+  Boolean                             $inventory_submit   = true,
+  Integer[10, 5000]                   $inventory_max_items = 500,
 ) {
   # Validate that we have some form of authentication
   if !$use_puppet_certs and !$api_token and !$api_key and !$classification_key {
@@ -155,6 +167,9 @@ class openvox_webui::client (
           timeout            => $timeout,
           template           => $template_name,
           classification_key => $classification_key,
+          inventory_enabled  => $inventory_enabled,
+          inventory_submit   => $inventory_submit,
+          inventory_max_items => $inventory_max_items,
       }),
       require => File[$config_dir],
     }

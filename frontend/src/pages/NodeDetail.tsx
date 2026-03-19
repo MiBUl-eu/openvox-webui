@@ -23,11 +23,23 @@ import {
   Loader2,
   Trash2,
   AlertTriangle,
+  Package,
+  Globe,
+  AppWindow,
+  Layers3,
 } from 'lucide-react';
 import { api } from '../services/api';
-import type { Report, NodeGroup, ResourceEvent, DeleteNodeResponse } from '../types';
+import type {
+  Report,
+  NodeGroup,
+  ResourceEvent,
+  DeleteNodeResponse,
+  NodeInventory,
+  InventorySnapshotSummary,
+} from '../types';
 
-type TabId = 'overview' | 'facts' | 'reports' | 'groups';
+type TabId = 'overview' | 'inventory' | 'facts' | 'reports' | 'groups';
+type InventoryView = 'all' | 'packages' | 'applications' | 'websites' | 'runtimes' | 'history';
 
 interface Tab {
   id: TabId;
@@ -37,6 +49,7 @@ interface Tab {
 
 const TABS: Tab[] = [
   { id: 'overview', label: 'Overview', icon: Server },
+  { id: 'inventory', label: 'Inventory', icon: Package },
   { id: 'facts', label: 'Facts', icon: Database },
   { id: 'reports', label: 'Reports', icon: FileText },
   { id: 'groups', label: 'Groups', icon: FolderTree },
@@ -84,6 +97,21 @@ function formatTimeAgo(dateString: string | null | undefined): string {
   if (diffDays < 7) return `${diffDays} days ago`;
 
   return date.toLocaleDateString();
+}
+
+function renderInventoryVersion(version: string, release?: string | null): string {
+  if (release) {
+    return `${version}-${release}`;
+  }
+
+  return version;
+}
+
+function matchesInventorySearch(values: Array<string | null | undefined>, query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+
+  return values.some((value) => value?.toLowerCase().includes(normalized));
 }
 
 // Type for PuppetDB fact format
@@ -789,6 +817,569 @@ function GroupMembership({
   );
 }
 
+function InventorySection({
+  inventory,
+  history,
+  historyLoading,
+}: {
+  inventory: NodeInventory | null | undefined;
+  history: InventorySnapshotSummary[];
+  historyLoading: boolean;
+}) {
+  if (!inventory) {
+    return (
+      <div className="text-center py-10 text-gray-500">
+        <Package className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+        <p>No inventory has been submitted for this node yet.</p>
+        <p className="text-sm text-gray-400 mt-1">
+          Phase 10 inventory data will appear here after an agent posts a snapshot.
+        </p>
+      </div>
+    );
+  }
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeView, setActiveView] = useState<InventoryView>('all');
+  const [packageRepoFilter, setPackageRepoFilter] = useState<string>('all');
+  const [applicationTypeFilter, setApplicationTypeFilter] = useState<string>('all');
+  const [websiteTypeFilter, setWebsiteTypeFilter] = useState<string>('all');
+  const [runtimeTypeFilter, setRuntimeTypeFilter] = useState<string>('all');
+
+  const packageRepos = useMemo(
+    () => ['all', ...new Set(inventory.packages.map((pkg) => pkg.repository_source).filter(Boolean) as string[])],
+    [inventory.packages],
+  );
+  const applicationTypes = useMemo(
+    () => ['all', ...new Set(inventory.applications.map((app) => app.application_type).filter(Boolean) as string[])],
+    [inventory.applications],
+  );
+  const websiteTypes = useMemo(
+    () => ['all', ...new Set(inventory.websites.map((site) => site.server_type).filter(Boolean))],
+    [inventory.websites],
+  );
+  const runtimeTypes = useMemo(
+    () => ['all', ...new Set(inventory.runtimes.map((runtime) => runtime.runtime_type).filter(Boolean))],
+    [inventory.runtimes],
+  );
+
+  const filteredPackages = useMemo(
+    () =>
+      inventory.packages.filter((pkg) => {
+        if (packageRepoFilter !== 'all' && pkg.repository_source !== packageRepoFilter) {
+          return false;
+        }
+
+        return matchesInventorySearch(
+          [pkg.name, pkg.version, pkg.release, pkg.architecture, pkg.repository_source, pkg.install_path],
+          searchQuery,
+        );
+      }),
+    [inventory.packages, packageRepoFilter, searchQuery],
+  );
+
+  const filteredApplications = useMemo(
+    () =>
+      inventory.applications.filter((app) => {
+        if (applicationTypeFilter !== 'all' && app.application_type !== applicationTypeFilter) {
+          return false;
+        }
+
+        return matchesInventorySearch(
+          [app.name, app.version, app.publisher, app.install_path, app.application_type, app.bundle_identifier],
+          searchQuery,
+        );
+      }),
+    [inventory.applications, applicationTypeFilter, searchQuery],
+  );
+
+  const filteredWebsites = useMemo(
+    () =>
+      inventory.websites.filter((site) => {
+        if (websiteTypeFilter !== 'all' && site.server_type !== websiteTypeFilter) {
+          return false;
+        }
+
+        return matchesInventorySearch(
+          [site.site_name, site.server_type, site.document_root, site.application_pool, site.tls_certificate_reference, site.bindings.join(' ')],
+          searchQuery,
+        );
+      }),
+    [inventory.websites, websiteTypeFilter, searchQuery],
+  );
+
+  const filteredRuntimes = useMemo(
+    () =>
+      inventory.runtimes.filter((runtime) => {
+        if (runtimeTypeFilter !== 'all' && runtime.runtime_type !== runtimeTypeFilter) {
+          return false;
+        }
+
+        return matchesInventorySearch(
+          [runtime.runtime_name, runtime.runtime_type, runtime.runtime_version, runtime.install_path, runtime.management_endpoint, runtime.deployed_units.join(' ')],
+          searchQuery,
+        );
+      }),
+    [inventory.runtimes, runtimeTypeFilter, searchQuery],
+  );
+
+  const filteredHistory = useMemo(
+    () =>
+      history.filter((entry) =>
+        matchesInventorySearch(
+          [entry.distribution, entry.os_family, entry.os_version, entry.collector_version, entry.is_full_snapshot ? 'full snapshot' : 'incremental'],
+          searchQuery,
+        ),
+      ),
+    [history, searchQuery],
+  );
+
+  const summaryCards = [
+    {
+      label: 'Packages',
+      value: inventory.summary.package_count,
+      icon: Package,
+    },
+    {
+      label: 'Applications',
+      value: inventory.summary.application_count,
+      icon: AppWindow,
+    },
+    {
+      label: 'Websites',
+      value: inventory.summary.website_count,
+      icon: Globe,
+    },
+    {
+      label: 'Runtimes',
+      value: inventory.summary.runtime_count,
+      icon: Layers3,
+    },
+  ];
+
+  const viewPills: Array<{ id: InventoryView; label: string; count: number }> = [
+    { id: 'all', label: 'All', count: inventory.summary.package_count + inventory.summary.application_count + inventory.summary.website_count + inventory.summary.runtime_count },
+    { id: 'packages', label: 'Packages', count: filteredPackages.length },
+    { id: 'applications', label: 'Applications', count: filteredApplications.length },
+    { id: 'websites', label: 'Websites', count: filteredWebsites.length },
+    { id: 'runtimes', label: 'Runtimes', count: filteredRuntimes.length },
+    { id: 'history', label: 'History', count: filteredHistory.length },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {summaryCards.map((card) => (
+          <div key={card.label} className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+            <div className="flex items-center gap-3">
+              <card.icon className="w-5 h-5 text-gray-400" />
+              <div>
+                <p className="text-xs text-gray-500">{card.label}</p>
+                <p className="text-lg font-semibold text-gray-900">{card.value}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Inventory Summary</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500">Operating System</p>
+            <p className="text-sm font-medium text-gray-900">
+              {inventory.summary.distribution} {inventory.summary.os_version}
+            </p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500">Patch Level</p>
+            <p className="text-sm font-medium text-gray-900">
+              {inventory.summary.patch_level || 'Unknown'}
+            </p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500">Architecture</p>
+            <p className="text-sm font-medium text-gray-900">
+              {inventory.summary.architecture || 'Unknown'}
+            </p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500">Package Manager</p>
+            <p className="text-sm font-medium text-gray-900">
+              {inventory.summary.package_manager || 'Unknown'}
+            </p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500">Last Inventory</p>
+            <p className="text-sm font-medium text-gray-900">
+              {new Date(inventory.summary.collected_at).toLocaleString()}
+            </p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500">Last Successful Update</p>
+            <p className="text-sm font-medium text-gray-900">
+              {inventory.summary.last_successful_update_at
+                ? new Date(inventory.summary.last_successful_update_at).toLocaleString()
+                : 'Never recorded'}
+            </p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500">Inventory Freshness</p>
+            <p className={`text-sm font-medium ${inventory.update_status?.is_stale ? 'text-amber-700' : 'text-gray-900'}`}>
+              {inventory.update_status?.is_stale ? 'Stale' : 'Current'}
+            </p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-500">Outdated Software</p>
+            <p className="text-sm font-medium text-gray-900">
+              {(inventory.update_status?.outdated_packages ?? 0) + (inventory.update_status?.outdated_applications ?? 0)} items
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+        <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+          <div className="relative flex-1">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search className="h-4 w-4 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search packages, apps, websites, runtimes, or history..."
+              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {viewPills.map((pill) => (
+              <button
+                key={pill.id}
+                onClick={() => setActiveView(pill.id)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  activeView === pill.id
+                    ? 'bg-primary-100 text-primary-700 border border-primary-300'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {pill.label} ({pill.count})
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <label className="text-sm">
+            <span className="block text-xs text-gray-500 mb-1">Package Source</span>
+            <select
+              value={packageRepoFilter}
+              onChange={(e) => setPackageRepoFilter(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            >
+              {packageRepos.map((repo) => (
+                <option key={repo} value={repo}>
+                  {repo === 'all' ? 'All package sources' : repo}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm">
+            <span className="block text-xs text-gray-500 mb-1">Application Type</span>
+            <select
+              value={applicationTypeFilter}
+              onChange={(e) => setApplicationTypeFilter(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            >
+              {applicationTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type === 'all' ? 'All application types' : type}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm">
+            <span className="block text-xs text-gray-500 mb-1">Website Server</span>
+            <select
+              value={websiteTypeFilter}
+              onChange={(e) => setWebsiteTypeFilter(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            >
+              {websiteTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type === 'all' ? 'All website servers' : type}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm">
+            <span className="block text-xs text-gray-500 mb-1">Runtime Type</span>
+            <select
+              value={runtimeTypeFilter}
+              onChange={(e) => setRuntimeTypeFilter(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            >
+              {runtimeTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type === 'all' ? 'All runtime types' : type}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {(activeView === 'all' || activeView === 'packages' || activeView === 'applications') && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Installed Packages
+            <span className="ml-2 text-sm font-normal text-gray-500">{filteredPackages.length} matching</span>
+          </h3>
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
+              {filteredPackages.length === 0 ? (
+                <div className="p-6 text-sm text-gray-500 text-center">No packages reported.</div>
+              ) : (
+                filteredPackages.slice(0, 250).map((pkg) => (
+                  <div key={`${pkg.name}-${pkg.version}-${pkg.release ?? 'na'}`} className="p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{pkg.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {renderInventoryVersion(pkg.version, pkg.release)}
+                          {pkg.architecture ? ` • ${pkg.architecture}` : ''}
+                        </p>
+                        {pkg.install_time && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            Installed {new Date(pkg.install_time).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                      {pkg.repository_source && (
+                        <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                          {pkg.repository_source}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          </div>
+
+          <div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Installed Applications
+            <span className="ml-2 text-sm font-normal text-gray-500">{filteredApplications.length} matching</span>
+          </h3>
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
+              {filteredApplications.length === 0 ? (
+                <div className="p-6 text-sm text-gray-500 text-center">No applications reported.</div>
+              ) : (
+                filteredApplications.slice(0, 250).map((app) => (
+                  <div key={`${app.name}-${app.version}-${app.install_path ?? 'na'}`} className="p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{app.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {app.version}
+                          {app.publisher ? ` • ${app.publisher}` : ''}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {[app.install_scope, app.architecture].filter(Boolean).join(' • ') || 'Scope unknown'}
+                        </p>
+                        {app.install_path && (
+                          <p className="text-xs text-gray-400 mt-1 font-mono break-all">
+                            {app.install_path}
+                          </p>
+                        )}
+                      </div>
+                      {app.application_type && (
+                        <span className="text-xs px-2 py-1 rounded-full bg-primary-50 text-primary-700">
+                          {app.application_type}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          </div>
+        </div>
+      )}
+
+      {inventory.update_status && (
+        <div className={`rounded-xl border p-4 ${
+          inventory.update_status.is_stale || inventory.update_status.outdated_items.length > 0
+            ? 'border-amber-200 bg-amber-50'
+            : 'border-emerald-200 bg-emerald-50'
+        }`}>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Update Status</p>
+              <p className="text-xs text-gray-500">
+                Checked {new Date(inventory.update_status.checked_at).toLocaleString()}
+              </p>
+            </div>
+            <div className="text-sm text-gray-700">
+              {inventory.update_status.is_stale
+                ? inventory.update_status.stale_reason || 'Inventory is stale'
+                : `${inventory.update_status.outdated_packages} outdated packages, ${inventory.update_status.outdated_applications} outdated applications`}
+            </div>
+          </div>
+          {inventory.update_status.outdated_items.length > 0 && (
+            <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {inventory.update_status.outdated_items.slice(0, 6).map((item) => (
+                <div key={`${item.software_type}-${item.name}-${item.installed_version}`} className="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                  <p className="text-sm font-medium text-gray-900">{item.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {item.software_type} • {item.installed_version}{item.installed_release ? `-${item.installed_release}` : ''} → {item.latest_version}{item.latest_release ? `-${item.latest_release}` : ''}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(activeView === 'all' || activeView === 'websites' || activeView === 'runtimes') && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Websites
+            <span className="ml-2 text-sm font-normal text-gray-500">{filteredWebsites.length} matching</span>
+          </h3>
+          <div className="space-y-3">
+            {filteredWebsites.length === 0 ? (
+              <div className="p-6 border border-gray-200 rounded-lg text-sm text-gray-500 text-center">
+                No website inventory reported.
+              </div>
+            ) : (
+              filteredWebsites.map((site) => (
+                <div key={`${site.server_type}-${site.site_name}`} className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-gray-900">{site.site_name}</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">{site.server_type}</p>
+                    </div>
+                    <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                      {site.bindings.join(', ') || 'No bindings'}
+                    </span>
+                  </div>
+                  {site.document_root && (
+                    <p className="text-xs text-gray-500 mt-2 font-mono break-all">{site.document_root}</p>
+                  )}
+                  {(site.application_pool || site.tls_certificate_reference) && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      {[site.application_pool && `App pool: ${site.application_pool}`, site.tls_certificate_reference && `TLS: ${site.tls_certificate_reference}`]
+                        .filter(Boolean)
+                        .join(' • ')}
+                    </p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+          </div>
+
+          <div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Runtimes
+            <span className="ml-2 text-sm font-normal text-gray-500">{filteredRuntimes.length} matching</span>
+          </h3>
+          <div className="space-y-3">
+            {filteredRuntimes.length === 0 ? (
+              <div className="p-6 border border-gray-200 rounded-lg text-sm text-gray-500 text-center">
+                No runtime inventory reported.
+              </div>
+            ) : (
+              filteredRuntimes.map((runtime) => (
+                <div key={`${runtime.runtime_type}-${runtime.runtime_name}`} className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-gray-900">{runtime.runtime_name}</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">{runtime.runtime_type}</p>
+                    </div>
+                    <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                      {runtime.runtime_version || 'Version unknown'}
+                    </span>
+                  </div>
+                  {runtime.deployed_units.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      Deployments: {runtime.deployed_units.join(', ')}
+                    </p>
+                  )}
+                  {runtime.install_path && (
+                    <p className="text-xs text-gray-400 mt-2 font-mono break-all">{runtime.install_path}</p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+          </div>
+        </div>
+      )}
+
+      {(activeView === 'all' || activeView === 'history') && (
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Inventory History</h3>
+          {historyLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" />
+            </div>
+          ) : filteredHistory.length === 0 ? (
+            <div className="p-6 border border-gray-200 rounded-lg text-sm text-gray-500 text-center">
+              No historical snapshots match the current search.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredHistory.map((entry, index) => {
+                const previous = filteredHistory[index + 1];
+                const packageDelta = previous ? entry.package_count - previous.package_count : null;
+                const applicationDelta = previous ? entry.application_count - previous.application_count : null;
+
+                return (
+                  <div key={entry.id} className="p-4 border border-gray-200 rounded-lg">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {entry.distribution} {entry.os_version}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Collected {new Date(entry.collected_at).toLocaleString()} via {entry.collector_version}
+                        </p>
+                      </div>
+                      <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                        {entry.is_full_snapshot ? 'Full snapshot' : 'Incremental'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      {entry.package_count} packages, {entry.application_count} applications, {entry.website_count} websites, {entry.runtime_count} runtimes
+                    </p>
+                    {(packageDelta !== null || applicationDelta !== null) && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {packageDelta !== null && `Packages ${packageDelta >= 0 ? '+' : ''}${packageDelta}`}
+                        {packageDelta !== null && applicationDelta !== null && ' • '}
+                        {applicationDelta !== null && `Applications ${applicationDelta >= 0 ? '+' : ''}${applicationDelta}`}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NodeDetail() {
   const { certname } = useParams<{ certname: string }>();
   const navigate = useNavigate();
@@ -836,6 +1427,28 @@ export default function NodeDetail() {
     queryFn: api.getGroups,
   });
 
+  const {
+    data: inventory,
+    isLoading: inventoryLoading,
+    refetch: refetchInventory,
+  } = useQuery({
+    queryKey: ['node-inventory', certname],
+    queryFn: () => api.getNodeInventory(certname!),
+    enabled: !!certname,
+    retry: false,
+  });
+
+  const {
+    data: inventoryHistory = [],
+    isLoading: inventoryHistoryLoading,
+    refetch: refetchInventoryHistory,
+  } = useQuery({
+    queryKey: ['node-inventory-history', certname],
+    queryFn: () => api.getNodeInventoryHistory(certname!),
+    enabled: !!certname,
+    retry: false,
+  });
+
   // Delete node mutation
   const deleteNodeMutation = useMutation({
     mutationFn: () => api.deleteNode(certname!),
@@ -856,6 +1469,8 @@ export default function NodeDetail() {
     refetchFacts();
     refetchReports();
     refetchGroups();
+    refetchInventory();
+    refetchInventoryHistory();
   };
 
   const handleDeleteClick = () => {
@@ -1110,16 +1725,55 @@ export default function NodeDetail() {
         </div>
         <div className="card">
           <div className="flex items-center gap-3">
-            <FolderTree className="w-5 h-5 text-gray-400" />
+            <Package className="w-5 h-5 text-gray-400" />
             <div>
-              <p className="text-xs text-gray-500">Groups</p>
+              <p className="text-xs text-gray-500">Inventory</p>
               <p className="text-sm font-medium text-gray-900">
-                {matchedGroupsCount} matched
+                {inventory?.summary.package_count ?? 0} packages
               </p>
             </div>
           </div>
         </div>
       </div>
+
+      {inventory && (
+        <div className="card mb-6 border border-primary-100 bg-primary-50/40">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div>
+              <p className="text-xs text-gray-500">OS Version</p>
+              <p className="text-sm font-medium text-gray-900">
+                {inventory.summary.distribution} {inventory.summary.os_version}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">OS Patch State</p>
+              <p className="text-sm font-medium text-gray-900">
+                {inventory.summary.patch_level || 'Unknown'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Last Inventory</p>
+              <p className="text-sm font-medium text-gray-900">
+                {formatTimeAgo(inventory.summary.collected_at)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Last Update</p>
+              <p className="text-sm font-medium text-gray-900">
+                {inventory.summary.last_successful_update_at
+                  ? formatTimeAgo(inventory.summary.last_successful_update_at)
+                  : 'Never'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Detected Assets</p>
+              <p className="text-sm font-medium text-gray-900">
+                {inventory.summary.application_count} apps, {inventory.summary.website_count} sites
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
@@ -1139,6 +1793,11 @@ export default function NodeDetail() {
               {tab.id === 'reports' && reports.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
                   {reports.length}
+                </span>
+              )}
+              {tab.id === 'inventory' && inventory && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
+                  {inventory.summary.package_count}
                 </span>
               )}
             </button>
@@ -1241,6 +1900,20 @@ export default function NodeDetail() {
         )}
 
         {activeTab === 'facts' && <FactsBrowser facts={normalizedFacts} />}
+
+        {activeTab === 'inventory' && (
+          inventoryLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+            </div>
+          ) : (
+            <InventorySection
+              inventory={inventory}
+              history={inventoryHistory}
+              historyLoading={inventoryHistoryLoading}
+            />
+          )
+        )}
 
         {activeTab === 'reports' && (
           reportsLoading ? (

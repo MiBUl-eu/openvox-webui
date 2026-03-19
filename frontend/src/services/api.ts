@@ -120,6 +120,14 @@ import type {
   ExtendRemovalDeadlineRequest,
   // Bootstrap types
   BootstrapConfigResponse,
+  NodeInventory,
+  InventorySnapshotSummary,
+  InventoryFleetStatusSummary,
+  InventoryDashboardReport,
+  RepositoryVersionCatalogEntry,
+  UpdateJob,
+  CreateUpdateJobRequest,
+  ApproveUpdateJobRequest,
 } from '../types';
 
 const client = axios.create({
@@ -212,6 +220,54 @@ export const api = {
 
   getNodeReports: async (certname: string): Promise<Report[]> => {
     const response = await client.get(`/nodes/${certname}/reports`);
+    return response.data;
+  },
+
+  getNodeInventory: async (certname: string): Promise<NodeInventory | null> => {
+    const response = await client.get(`/nodes/${certname}/inventory`);
+    return response.data;
+  },
+
+  getNodeInventoryHistory: async (certname: string): Promise<InventorySnapshotSummary[]> => {
+    const response = await client.get(`/nodes/${certname}/inventory/history`);
+    return response.data;
+  },
+
+  getInventorySummary: async (): Promise<InventoryFleetStatusSummary> => {
+    const response = await client.get('/inventory/summary');
+    return response.data;
+  },
+
+  getInventoryDashboard: async (): Promise<InventoryDashboardReport> => {
+    const response = await client.get('/inventory/dashboard');
+    return response.data;
+  },
+
+  getUpdateJobs: async (): Promise<UpdateJob[]> => {
+    const response = await client.get('/inventory/updates');
+    return response.data;
+  },
+
+  getUpdateJob: async (jobId: string): Promise<UpdateJob> => {
+    const response = await client.get(`/inventory/updates/${jobId}`);
+    return response.data;
+  },
+
+  createUpdateJob: async (request: CreateUpdateJobRequest): Promise<UpdateJob> => {
+    const response = await client.post('/inventory/updates', request);
+    return response.data;
+  },
+
+  approveUpdateJob: async (
+    jobId: string,
+    request: ApproveUpdateJobRequest
+  ): Promise<UpdateJob> => {
+    const response = await client.post(`/inventory/updates/${jobId}/approve`, request);
+    return response.data;
+  },
+
+  getInventoryCatalog: async (): Promise<RepositoryVersionCatalogEntry[]> => {
+    const response = await client.get('/inventory/catalog');
     return response.data;
   },
 

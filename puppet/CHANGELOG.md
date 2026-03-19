@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 10.2 Puppet-side inventory collectors for Linux, Windows, and macOS with package/application, website, and runtime discovery
+- `openvox_inventory_status` fact for inventory collection status and submission summary
+- `openvox_webui::client` options to enable inventory collection, control submission, and cap collected item counts
+- Phase 10.1 inventory backend foundation with authenticated node inventory submission endpoint and node inventory/history APIs for the WebUI
 - Environment group feature for node groups that assign environments instead of filtering by them
 - Match All Nodes option for node groups to control behavior when no rules are defined
 - Shared key authentication option for classification endpoint (debug mode)
@@ -36,11 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Group permission checks now use async database queries for better performance and consistency
 - Frontend lint toolchain now uses ESLint 10 with updated TypeScript and React plugin dependencies
 
+### Fixed
+- Inventory collector normalization now works on older Ruby runtimes without `filter_map`
+
 ### Security
 - Classification endpoint (`/api/v1/nodes/:certname/classify`) now requires client certificate authentication (mTLS)
 - Added optional shared key authentication as alternative to mTLS for debugging purposes
 
-### Fixed
 - Pinned nodes now correctly match their group even when parent groups don't match via rules
 - Child groups now only match nodes that also match their parent group (for non-pinned nodes)
 - Bootstrap script now correctly uses Vox Pupuli release packages from apt.voxpupuli.org with manual configuration fallback

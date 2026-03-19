@@ -234,7 +234,9 @@ See [docs/INSTALLATION.md](docs/INSTALLATION.md) for detailed setup instructions
 
 ---
 
-## Planned Phase 10: Application Inventory & Update Management
+## Phase 10: Application Inventory & Update Management
+
+Status: In progress. Phases 10.1 through 10.5 are implemented, and Phase 10.6 is in progress with update-job orchestration foundations in place.
 
 ### Goal
 - Turn OpenVox WebUI into a central inventory and update management console for Windows, Linux, and macOS nodes managed through the OpenVox Puppet module.
@@ -416,32 +418,32 @@ See [docs/INSTALLATION.md](docs/INSTALLATION.md) for detailed setup instructions
 
 ### Delivery Phases
 
-#### Phase 10.1: Inventory Schema & Transport
+#### Phase 10.1: Inventory Schema & Transport (Completed)
 - Define canonical inventory schema and ingestion API
 - Extend Puppet module with inventory submission support
 - Add database tables for OS, packages, applications, websites, runtimes, and snapshots
 
-#### Phase 10.2: OS-Specific Collectors
+#### Phase 10.2: OS-Specific Collectors (Completed)
 - Linux RPM/DEB collectors
 - Windows installed applications and IIS collectors
 - macOS app bundle and Homebrew collectors
 - Apache, NGINX, Tomcat, and JBoss discovery collectors
 
-#### Phase 10.3: Node Inventory UI
+#### Phase 10.3: Node Inventory UI (Completed)
 - Node inventory cards and detailed inventory sections
 - Search, filter, and history views per node
 
-#### Phase 10.4: Version Intelligence & Scheduled Jobs
+#### Phase 10.4: Version Intelligence & Scheduled Jobs (Completed)
 - Repository sync workers for Linux, Windows, and macOS sources
 - Outdated-version comparison engine
 - Scheduled jobs and stale inventory detection
 
-#### Phase 10.5: Fleet Statistics & Compliance Reporting
+#### Phase 10.5: Fleet Statistics & Compliance Reporting (Completed)
 - Separate inventory/update dashboard
 - Updated vs outdated statistics
 - Patch aging, coverage, and drift metrics
 
-#### Phase 10.6: Update Orchestration
+#### Phase 10.6: Update Orchestration (In Progress)
 - Single-node updates
 - Bulk group updates
 - Scheduling, approvals, execution tracking, and audit logging

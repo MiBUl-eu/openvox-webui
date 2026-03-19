@@ -154,3 +154,97 @@ async fn test_not_found_returns_404() {
 
     response.assert_not_found();
 }
+
+#[tokio::test]
+async fn test_inventory_update_job_api_lifecycle() {
+    let app = TestApp::new().await;
+    let token = generate_test_token(
+        &app.state.config,
+        Uuid::new_v4(),
+        "operator",
+        vec!["operator".to_string()],
+    );
+
+    let create_request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/v1/inventory/updates")
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({
+                "operation_type": "package_update",
+                "package_names": ["nginx"],
+                "certnames": ["node1.example.com"],
+                "requires_approval": true
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let create_response = app.request_with_auth(create_request, &token).await;
+    create_response.assert_created();
+    let created: serde_json::Value = create_response.json();
+    let job_id = created["id"].as_str().expect("job id").to_string();
+
+    let approve_request = axum::http::Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/inventory/updates/{}/approve", job_id))
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({
+                "approved": true,
+                "notes": "go ahead"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let approve_response = app.request_with_auth(approve_request, &token).await;
+    approve_response.assert_ok();
+
+    let poll_request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/v1/nodes/node1.example.com/update-jobs")
+        .header("X-SSL-Client-Verify", "SUCCESS")
+        .header("X-SSL-Client-CN", "node1.example.com")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let poll_response = app.request(poll_request).await;
+    poll_response.assert_ok();
+    let polled: Vec<serde_json::Value> = poll_response.json();
+    assert_eq!(polled.len(), 1);
+    let target_id = polled[0]["target_id"]
+        .as_str()
+        .expect("target id")
+        .to_string();
+
+    let result_request = axum::http::Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/api/v1/nodes/node1.example.com/update-jobs/{}/targets/{}/results",
+            job_id, target_id
+        ))
+        .header("Content-Type", "application/json")
+        .header("X-SSL-Client-Verify", "SUCCESS")
+        .header("X-SSL-Client-CN", "node1.example.com")
+        .body(axum::body::Body::from(
+            serde_json::json!({
+                "status": "succeeded",
+                "summary": "updated nginx",
+                "output": "ok"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let result_response = app.request(result_request).await;
+    result_response.assert_ok();
+    let completed: serde_json::Value = result_response.json();
+    assert_eq!(completed["status"], "completed");
+
+    let get_request = axum::http::Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/inventory/updates/{}", job_id))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let get_response = app.request_with_auth(get_request, &token).await;
+    get_response.assert_ok();
+    let fetched: serde_json::Value = get_response.json();
+    assert_eq!(fetched["results"].as_array().map(|v| v.len()), Some(1));
+}

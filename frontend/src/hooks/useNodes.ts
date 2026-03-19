@@ -31,3 +31,12 @@ export function useNodeReports(certname: string | undefined) {
     enabled: !!certname,
   });
 }
+
+export function useNodeInventory(certname: string | undefined) {
+  return useQuery({
+    queryKey: ['node-inventory', certname],
+    queryFn: () => api.getNodeInventory(certname!),
+    enabled: !!certname,
+    retry: false,
+  });
+}

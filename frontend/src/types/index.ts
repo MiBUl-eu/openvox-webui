@@ -25,6 +25,269 @@ export interface DeleteNodeResponse {
   puppetdb_deactivated: boolean;
 }
 
+export interface InventorySnapshotSummary {
+  id: string;
+  certname: string;
+  collector_version: string;
+  collected_at: string;
+  is_full_snapshot: boolean;
+  os_family: string;
+  distribution: string;
+  os_version: string;
+  package_count: number;
+  application_count: number;
+  website_count: number;
+  runtime_count: number;
+  created_at: string;
+}
+
+export interface HostOsInventory {
+  os_family: string;
+  distribution: string;
+  edition?: string | null;
+  architecture?: string | null;
+  kernel_version?: string | null;
+  os_version: string;
+  patch_level?: string | null;
+  package_manager?: string | null;
+  update_channel?: string | null;
+  last_inventory_at?: string | null;
+  last_successful_update_at?: string | null;
+}
+
+export interface HostPackageInventoryItem {
+  name: string;
+  epoch?: string | null;
+  version: string;
+  release?: string | null;
+  architecture?: string | null;
+  repository_source?: string | null;
+  install_path?: string | null;
+  install_time?: string | null;
+}
+
+export interface HostApplicationInventoryItem {
+  name: string;
+  publisher?: string | null;
+  version: string;
+  architecture?: string | null;
+  install_scope?: string | null;
+  install_path?: string | null;
+  application_type?: string | null;
+  bundle_identifier?: string | null;
+  uninstall_identity?: string | null;
+  install_date?: string | null;
+  metadata?: unknown;
+}
+
+export interface HostWebInventoryItem {
+  server_type: string;
+  site_name: string;
+  bindings: string[];
+  document_root?: string | null;
+  application_pool?: string | null;
+  tls_certificate_reference?: string | null;
+  metadata?: unknown;
+}
+
+export interface HostRuntimeInventoryItem {
+  runtime_type: string;
+  runtime_name: string;
+  runtime_version?: string | null;
+  install_path?: string | null;
+  management_endpoint?: string | null;
+  deployed_units: string[];
+  metadata?: unknown;
+}
+
+export interface InventorySummary {
+  certname: string;
+  os_family: string;
+  distribution: string;
+  os_version: string;
+  patch_level?: string | null;
+  architecture?: string | null;
+  package_manager?: string | null;
+  update_channel?: string | null;
+  last_inventory_at?: string | null;
+  last_successful_update_at?: string | null;
+  package_count: number;
+  application_count: number;
+  website_count: number;
+  runtime_count: number;
+  collected_at: string;
+  collector_version: string;
+  is_stale: boolean;
+}
+
+export interface OutdatedInventoryItem {
+  software_type: string;
+  name: string;
+  installed_version: string;
+  installed_release?: string | null;
+  latest_version: string;
+  latest_release?: string | null;
+  repository_source?: string | null;
+}
+
+export interface HostUpdateStatus {
+  certname: string;
+  snapshot_id?: string | null;
+  is_stale: boolean;
+  stale_reason?: string | null;
+  outdated_packages: number;
+  outdated_applications: number;
+  total_packages: number;
+  total_applications: number;
+  checked_at: string;
+  outdated_items: OutdatedInventoryItem[];
+}
+
+export interface RepositoryVersionCatalogEntry {
+  id: string;
+  platform_family: string;
+  distribution: string;
+  package_manager?: string | null;
+  software_type: string;
+  software_name: string;
+  repository_source?: string | null;
+  latest_version: string;
+  latest_release?: string | null;
+  source_kind: string;
+  observed_nodes: number;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryFleetStatusSummary {
+  total_nodes: number;
+  stale_nodes: number;
+  nodes_with_inventory: number;
+  nodes_without_inventory: number;
+  outdated_nodes: number;
+  outdated_packages: number;
+  outdated_applications: number;
+  generated_at: string;
+}
+
+export interface InventoryDistributionPoint {
+  label: string;
+  value: number;
+}
+
+export interface PatchAgeBucket {
+  label: string;
+  value: number;
+}
+
+export interface TopOutdatedSoftwareItem {
+  software_type: string;
+  name: string;
+  affected_nodes: number;
+}
+
+export interface InventoryDashboardReport {
+  summary: InventoryFleetStatusSummary;
+  platform_distribution: InventoryDistributionPoint[];
+  os_distribution: InventoryDistributionPoint[];
+  update_compliance: InventoryDistributionPoint[];
+  patch_age_buckets: PatchAgeBucket[];
+  top_outdated_software: TopOutdatedSoftwareItem[];
+}
+
+export type UpdateJobStatus =
+  | 'pending_approval'
+  | 'approved'
+  | 'rejected'
+  | 'in_progress'
+  | 'completed'
+  | 'completed_with_failures'
+  | 'cancelled';
+
+export type UpdateTargetStatus =
+  | 'pending_approval'
+  | 'queued'
+  | 'dispatched'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'rejected';
+
+export type UpdateOperationType =
+  | 'package_update'
+  | 'package_install'
+  | 'package_remove'
+  | 'system_patch';
+
+export interface UpdateJobTarget {
+  id: string;
+  certname: string;
+  status: UpdateTargetStatus;
+  dispatched_at?: string | null;
+  completed_at?: string | null;
+  last_error?: string | null;
+}
+
+export interface UpdateJobResult {
+  id: string;
+  target_id: string;
+  certname: string;
+  status: UpdateTargetStatus;
+  summary?: string | null;
+  output?: string | null;
+  started_at?: string | null;
+  finished_at: string;
+}
+
+export interface UpdateJob {
+  id: string;
+  status: UpdateJobStatus;
+  operation_type: UpdateOperationType;
+  package_names: string[];
+  target_group_id?: string | null;
+  target_nodes: string[];
+  requires_approval: boolean;
+  scheduled_for?: string | null;
+  maintenance_window_start?: string | null;
+  maintenance_window_end?: string | null;
+  requested_by: string;
+  approved_by?: string | null;
+  approval_notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  targets: UpdateJobTarget[];
+  results: UpdateJobResult[];
+}
+
+export interface CreateUpdateJobRequest {
+  operation_type: UpdateOperationType;
+  package_names?: string[];
+  certnames?: string[];
+  group_id?: string | null;
+  requires_approval?: boolean;
+  scheduled_for?: string | null;
+  maintenance_window_start?: string | null;
+  maintenance_window_end?: string | null;
+  approval_notes?: string | null;
+}
+
+export interface ApproveUpdateJobRequest {
+  approved: boolean;
+  notes?: string | null;
+}
+
+export interface NodeInventory {
+  snapshot: InventorySnapshotSummary;
+  summary: InventorySummary;
+  update_status?: HostUpdateStatus | null;
+  os: HostOsInventory;
+  packages: HostPackageInventoryItem[];
+  applications: HostApplicationInventoryItem[];
+  websites: HostWebInventoryItem[];
+  runtimes: HostRuntimeInventoryItem[];
+}
+
 // Group types
 export type RuleMatchType = 'all' | 'any';
 
