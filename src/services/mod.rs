@@ -11,6 +11,7 @@ pub mod code_deploy;
 pub mod code_deploy_scheduler;
 pub mod facter;
 pub mod git;
+pub mod inventory_scheduler;
 pub mod node_removal_scheduler;
 pub mod notification;
 pub mod puppet_ca;
@@ -26,13 +27,17 @@ pub use alerting::AlertingService;
 pub use auth::AuthService;
 pub use backup::BackupService;
 pub use backup_encryption::EncryptedData;
+pub use backup_scheduler::{start_backup_scheduler, BackupSchedulerState};
 pub use cache::{
     Cache, CacheEntry, CacheEvictionStats, CacheServiceStats, CacheStats, CacheSyncJob,
     CachedPuppetDbService,
 };
 pub use code_deploy::{CodeDeployConfig, CodeDeployService};
+pub use code_deploy_scheduler::{start_code_deploy_scheduler, CodeDeploySchedulerState};
 pub use facter::{ExportFormat, FacterService, GeneratedFacts};
 pub use git::{BranchInfo, CommitInfo, GitService, GitServiceConfig};
+pub use inventory_scheduler::{start_inventory_scheduler, InventorySchedulerState};
+pub use node_removal_scheduler::{start_node_removal_scheduler, NodeRemovalSchedulerState};
 pub use notification::{NotificationEvent, NotificationService};
 pub use puppet_ca::PuppetCAService;
 pub use puppetdb::{
@@ -46,6 +51,3 @@ pub use rbac_db::DbRbacService;
 pub use reporting::ReportingService;
 pub use saml::{SamlAssertion, SamlService};
 pub use scheduler::{ReportScheduler, ScheduleExecutionResult};
-pub use code_deploy_scheduler::{start_code_deploy_scheduler, CodeDeploySchedulerState};
-pub use backup_scheduler::{start_backup_scheduler, BackupSchedulerState};
-pub use node_removal_scheduler::{start_node_removal_scheduler, NodeRemovalSchedulerState};

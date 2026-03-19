@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Phase 10.6 update orchestration foundation with persisted update jobs, approval workflow, node polling/result APIs, and frontend client types for update operations
+- Phase 10.5 fleet inventory dashboard reporting with compliance, patch age, platform distribution, and top outdated software analytics
+- Phase 10.4 inventory intelligence with scheduled version catalog refresh, stale inventory detection, per-node outdated status, and inventory summary/catalog APIs
+- Phase 10.3 node inventory UX with searchable per-node inventory sections, filter controls, and richer inventory history views
+- Phase 10.2 collector support in the Puppet client module for OS-specific inventory gathering and submission to node inventory APIs
+- Phase 10.1 inventory foundation with inventory snapshot schema, authenticated node ingestion endpoint, node inventory history API, and inventory UI on the node detail page
 - **Global SMTP Configuration:** New settings table with key-value structure for flexible application settings
 - **SMTP Settings UI:** New "Email/SMTP" tab in Admin Settings for configuring SMTP server (host, port, username, password, sender, TLS)
 - **Simplified Email Channels:** Email notification channels now only require recipient email address
@@ -33,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Default notification channels** via new migration - system removes pre-configured system-email and system-webhook channels that were non-functional
 
 ### Fixed
+- Puppet inventory collector Ruby compatibility by replacing `filter_map` usage and adding collector normalization tests
 - Fixed Rust compilation errors in evaluate_condition function - properly handle optional AlertCondition fields (field and value)
 - **Alert rule channel associations not being saved** - add_channel now properly generates ID for alert_rule_channels table inserts
 - **Improved Alert Rules UX:** Added ability to add/remove multiple conditions easily with dedicated Add/Remove buttons

@@ -9,6 +9,9 @@
   Integer                        $timeout,
   String[1]                      $template,
   Optional[String[1]]            $classification_key,
+  Boolean                        $inventory_enabled,
+  Boolean                        $inventory_submit,
+  Integer                        $inventory_max_items,
 | -%>
 # OpenVox WebUI Client Configuration
 # Managed by Puppet - DO NOT EDIT
@@ -46,6 +49,11 @@ ssl_verify: <%= $ssl_verify %>
 
 # Request timeout in seconds
 timeout: <%= $timeout %>
+
+# Inventory collection settings
+inventory_enabled: <%= $inventory_enabled %>
+inventory_submit: <%= $inventory_submit %>
+inventory_max_items: <%= $inventory_max_items %>
 <%- if $classification_key { -%>
 
 # Shared key for classification endpoint authentication (alternative to mTLS)

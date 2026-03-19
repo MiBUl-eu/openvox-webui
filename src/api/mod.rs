@@ -19,6 +19,7 @@ mod facter;
 mod facts;
 mod groups;
 mod health;
+mod inventory;
 mod node_removal;
 mod nodes;
 mod notifications;
@@ -89,6 +90,8 @@ pub fn protected_routes() -> Router<AppState> {
         .nest("/node-removal", node_removal::routes())
         // Notification endpoints
         .nest("/notifications", notifications::routes())
+        // Inventory intelligence endpoints
+        .nest("/inventory", inventory::routes())
 }
 
 /// Create the full API router (public + protected; useful for tests)

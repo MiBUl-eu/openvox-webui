@@ -137,7 +137,10 @@ async fn main() -> Result<()> {
     // Start Code Deploy scheduler if enabled
     let _code_deploy_scheduler = if let Some(ref cd_config) = code_deploy_config {
         info!("Starting Code Deploy scheduler");
-        Some(services::start_code_deploy_scheduler(db.clone(), cd_config.clone()))
+        Some(services::start_code_deploy_scheduler(
+            db.clone(),
+            cd_config.clone(),
+        ))
     } else {
         None
     };
@@ -145,7 +148,10 @@ async fn main() -> Result<()> {
     // Initialize Backup config if enabled
     let backup_config = config.backup.clone().and_then(|backup| {
         if backup.enabled {
-            info!("Backup feature enabled, backup dir: {:?}", backup.backup_dir);
+            info!(
+                "Backup feature enabled, backup dir: {:?}",
+                backup.backup_dir
+            );
             Some(backup)
         } else {
             info!("Backup feature is disabled");
@@ -156,7 +162,10 @@ async fn main() -> Result<()> {
     // Start Backup scheduler if enabled
     let _backup_scheduler = if let Some(ref backup_cfg) = backup_config {
         info!("Starting Backup scheduler");
-        Some(services::start_backup_scheduler(db.clone(), backup_cfg.clone()))
+        Some(services::start_backup_scheduler(
+            db.clone(),
+            backup_cfg.clone(),
+        ))
     } else {
         None
     };
@@ -191,6 +200,32 @@ async fn main() -> Result<()> {
             None
         }
         _ => None,
+    };
+
+    // Initialize inventory/version intelligence config if enabled
+    let inventory_config = config.inventory.clone().and_then(|inventory| {
+        if inventory.enabled {
+            info!(
+                "Inventory intelligence enabled (catalog: {}s, status: {}s, stale after: {}h)",
+                inventory.catalog_refresh_interval_secs,
+                inventory.status_refresh_interval_secs,
+                inventory.stale_after_hours
+            );
+            Some(inventory)
+        } else {
+            info!("Inventory intelligence is disabled");
+            None
+        }
+    });
+
+    let _inventory_scheduler = if let Some(ref inventory_cfg) = inventory_config {
+        info!("Starting Inventory scheduler");
+        Some(services::start_inventory_scheduler(
+            db.clone(),
+            inventory_cfg.clone(),
+        ))
+    } else {
+        None
     };
 
     // Initialize notification service
@@ -257,14 +292,20 @@ async fn main() -> Result<()> {
 }
 
 /// Create RusTLS configuration from TLS config
-async fn create_rustls_config(tls_config: &config::TlsConfig) -> Result<axum_server::tls_rustls::RustlsConfig> {
+async fn create_rustls_config(
+    tls_config: &config::TlsConfig,
+) -> Result<axum_server::tls_rustls::RustlsConfig> {
     use axum_server::tls_rustls::RustlsConfig;
     use rustls::crypto::aws_lc_rs::default_provider;
     use rustls::ServerConfig;
 
     // Load certificate chain
-    let cert_file = std::fs::File::open(&tls_config.cert_file)
-        .with_context(|| format!("Failed to open certificate file: {:?}", tls_config.cert_file))?;
+    let cert_file = std::fs::File::open(&tls_config.cert_file).with_context(|| {
+        format!(
+            "Failed to open certificate file: {:?}",
+            tls_config.cert_file
+        )
+    })?;
     let mut cert_reader = BufReader::new(cert_file);
     let certs: Vec<_> = rustls_pemfile::certs(&mut cert_reader)
         .filter_map(|r| r.ok())
@@ -286,13 +327,23 @@ async fn create_rustls_config(tls_config: &config::TlsConfig) -> Result<axum_ser
     let provider = default_provider();
 
     // Determine minimum TLS version from config
-    let versions: Vec<&'static rustls::SupportedProtocolVersion> = match tls_config.min_version.as_str() {
-        "1.3" => vec![&rustls::version::TLS13],
-        "1.2" | _ => vec![&rustls::version::TLS12, &rustls::version::TLS13],
-    };
+    let versions: Vec<&'static rustls::SupportedProtocolVersion> =
+        match tls_config.min_version.as_str() {
+            "1.3" => vec![&rustls::version::TLS13],
+            "1.2" | _ => vec![&rustls::version::TLS12, &rustls::version::TLS13],
+        };
 
-    info!("TLS configured with minimum version: {}", tls_config.min_version);
-    info!("Enabled TLS versions: {:?}", versions.iter().map(|v| format!("{:?}", v.version)).collect::<Vec<_>>());
+    info!(
+        "TLS configured with minimum version: {}",
+        tls_config.min_version
+    );
+    info!(
+        "Enabled TLS versions: {:?}",
+        versions
+            .iter()
+            .map(|v| format!("{:?}", v.version))
+            .collect::<Vec<_>>()
+    );
 
     // Build ServerConfig with specified TLS versions
     let mut server_config = ServerConfig::builder_with_provider(provider.into())
@@ -522,8 +573,7 @@ fn create_router(state: AppState, config: &AppConfig) -> Router {
 
     // Initialize rate limiting
     let api_rate_limit = middleware::create_rate_limit_state(middleware::api_rate_limit_config());
-    let auth_rate_limit =
-        middleware::create_rate_limit_state(middleware::auth_rate_limit_config());
+    let auth_rate_limit = middleware::create_rate_limit_state(middleware::auth_rate_limit_config());
 
     // Spawn background cleanup task for rate limiters
     middleware::spawn_rate_limit_cleanup(api_rate_limit.clone());
@@ -572,17 +622,23 @@ fn create_router(state: AppState, config: &AppConfig) -> Router {
                 let index_file = static_dir.join("index.html");
                 if index_file.exists() {
                     // Create a service that serves static files and falls back to index.html
-                    let serve_dir = ServeDir::new(static_dir)
-                        .not_found_service(ServeFile::new(&index_file));
+                    let serve_dir =
+                        ServeDir::new(static_dir).not_found_service(ServeFile::new(&index_file));
 
                     api_router.fallback_service(serve_dir)
                 } else {
-                    warn!("index.html not found in {:?}, SPA fallback disabled", static_dir);
+                    warn!(
+                        "index.html not found in {:?}, SPA fallback disabled",
+                        static_dir
+                    );
                     let serve_dir = ServeDir::new(static_dir);
                     api_router.fallback_service(serve_dir)
                 }
             } else {
-                warn!("Static directory {:?} does not exist, frontend not served", static_dir);
+                warn!(
+                    "Static directory {:?} does not exist, frontend not served",
+                    static_dir
+                );
                 api_router
             }
         } else {
@@ -651,7 +707,10 @@ async fn fix_database() -> Result<()> {
     };
     use std::time::Duration;
 
-    println!("OpenVox WebUI Database Repair Tool v{}", env!("CARGO_PKG_VERSION"));
+    println!(
+        "OpenVox WebUI Database Repair Tool v{}",
+        env!("CARGO_PKG_VERSION")
+    );
     println!();
 
     // Load configuration
@@ -771,7 +830,10 @@ async fn fix_database() -> Result<()> {
         println!();
         println!("You can now start the application normally.");
     } else {
-        eprintln!("WARNING: {} missing table(s) after migrations:", missing_tables.len());
+        eprintln!(
+            "WARNING: {} missing table(s) after migrations:",
+            missing_tables.len()
+        );
         for table in &missing_tables {
             eprintln!("  - {}", table);
         }
@@ -793,7 +855,10 @@ fn check_r10k_permissions() -> Result<()> {
     use std::os::unix::fs::MetadataExt;
     use std::path::Path;
 
-    println!("OpenVox WebUI r10k Permissions Checker v{}", env!("CARGO_PKG_VERSION"));
+    println!(
+        "OpenVox WebUI r10k Permissions Checker v{}",
+        env!("CARGO_PKG_VERSION")
+    );
     println!();
 
     // Get current user info
@@ -801,7 +866,10 @@ fn check_r10k_permissions() -> Result<()> {
     let current_gid = unsafe { libc::getgid() };
     let current_user = std::env::var("USER").unwrap_or_else(|_| format!("uid:{}", current_uid));
 
-    println!("Current user: {} (uid={}, gid={})", current_user, current_uid, current_gid);
+    println!(
+        "Current user: {} (uid={}, gid={})",
+        current_user, current_uid, current_gid
+    );
     println!();
 
     // Load configuration to get r10k paths
@@ -811,16 +879,34 @@ fn check_r10k_permissions() -> Result<()> {
     let mut dirs_to_check: Vec<(&str, String)> = Vec::new();
 
     // Default r10k directories
-    dirs_to_check.push(("r10k cache", "/opt/puppetlabs/puppet/cache/r10k".to_string()));
-    dirs_to_check.push(("Puppet environments", "/etc/puppetlabs/code/environments".to_string()));
+    dirs_to_check.push((
+        "r10k cache",
+        "/opt/puppetlabs/puppet/cache/r10k".to_string(),
+    ));
+    dirs_to_check.push((
+        "Puppet environments",
+        "/etc/puppetlabs/code/environments".to_string(),
+    ));
 
     // Add configured directories if Code Deploy is enabled
     if let Some(ref cd) = config.code_deploy {
         if cd.enabled {
-            dirs_to_check.push(("repos_base_dir", cd.repos_base_dir.to_string_lossy().to_string()));
-            dirs_to_check.push(("ssh_keys_dir", cd.ssh_keys_dir.to_string_lossy().to_string()));
-            dirs_to_check.push(("environments_basedir", cd.environments_basedir.to_string_lossy().to_string()));
-            dirs_to_check.push(("r10k_cachedir (config)", cd.r10k_cachedir.to_string_lossy().to_string()));
+            dirs_to_check.push((
+                "repos_base_dir",
+                cd.repos_base_dir.to_string_lossy().to_string(),
+            ));
+            dirs_to_check.push((
+                "ssh_keys_dir",
+                cd.ssh_keys_dir.to_string_lossy().to_string(),
+            ));
+            dirs_to_check.push((
+                "environments_basedir",
+                cd.environments_basedir.to_string_lossy().to_string(),
+            ));
+            dirs_to_check.push((
+                "r10k_cachedir (config)",
+                cd.r10k_cachedir.to_string_lossy().to_string(),
+            ));
         }
     }
 
@@ -837,7 +923,10 @@ fn check_r10k_permissions() -> Result<()> {
         if !path.exists() {
             println!("  Status: DOES NOT EXIST");
             fix_commands.push(format!("sudo mkdir -p {}", path_str));
-            fix_commands.push(format!("sudo chown -R openvox-webui:openvox-webui {}", path_str));
+            fix_commands.push(format!(
+                "sudo chown -R openvox-webui:openvox-webui {}",
+                path_str
+            ));
             issues_found = true;
             continue;
         }
@@ -849,10 +938,15 @@ fn check_r10k_permissions() -> Result<()> {
                 let mode = meta.mode();
 
                 // Try to get owner name
-                let owner_name = get_username(owner_uid).unwrap_or_else(|| format!("uid:{}", owner_uid));
-                let group_name = get_groupname(owner_gid).unwrap_or_else(|| format!("gid:{}", owner_gid));
+                let owner_name =
+                    get_username(owner_uid).unwrap_or_else(|| format!("uid:{}", owner_uid));
+                let group_name =
+                    get_groupname(owner_gid).unwrap_or_else(|| format!("gid:{}", owner_gid));
 
-                println!("  Owner: {}:{} ({}:{})", owner_name, group_name, owner_uid, owner_gid);
+                println!(
+                    "  Owner: {}:{} ({}:{})",
+                    owner_name, group_name, owner_uid, owner_gid
+                );
                 println!("  Mode: {:o}", mode & 0o7777);
 
                 // Check if current user can write
@@ -885,7 +979,10 @@ fn check_r10k_permissions() -> Result<()> {
                     }
 
                     if owner_uid != current_uid {
-                        fix_commands.push(format!("sudo chown -R openvox-webui:openvox-webui {}", path_str));
+                        fix_commands.push(format!(
+                            "sudo chown -R openvox-webui:openvox-webui {}",
+                            path_str
+                        ));
                     }
                 }
             }
@@ -947,8 +1044,13 @@ fn check_subdirs_ownership(path: &std::path::Path, expected_uid: u32) {
             let entry_path = entry.path();
             if let Ok(meta) = entry_path.metadata() {
                 if meta.uid() != expected_uid {
-                    let owner = get_username(meta.uid()).unwrap_or_else(|| format!("uid:{}", meta.uid()));
-                    println!("    - {} owned by {} (not current user)", entry_path.display(), owner);
+                    let owner =
+                        get_username(meta.uid()).unwrap_or_else(|| format!("uid:{}", meta.uid()));
+                    println!(
+                        "    - {} owned by {} (not current user)",
+                        entry_path.display(),
+                        owner
+                    );
                 }
             }
         }

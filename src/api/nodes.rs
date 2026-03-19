@@ -5,18 +5,22 @@
 use axum::{
     extract::{Path, Query, State},
     http::{header::HeaderMap, StatusCode},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::repository::GroupRepository,
+    db::{repository::GroupRepository, InventoryRepository},
     middleware::{
         rbac::{check_permission, RbacError},
         AuthUser, OptionalClientCert,
     },
-    models::{default_organization_uuid, Action, ClassificationResult, Fact, Node, Report, Resource as RbacResource},
+    models::{
+        default_organization_uuid, Action, ClassificationResult, Fact, InventoryPayload,
+        InventorySnapshotSummary, Node, NodeInventory, NodePendingUpdateJob, Report,
+        Resource as RbacResource, SubmitUpdateJobResultRequest, UpdateJob,
+    },
     services::{
         classification::ClassificationService,
         puppetdb::{QueryBuilder, QueryParams, Resource},
@@ -35,6 +39,11 @@ pub fn routes() -> Router<AppState> {
         .route("/{certname}/resources", get(get_node_resources))
         .route("/{certname}/catalog", get(get_node_catalog))
         .route("/{certname}/classification", get(get_node_classification))
+        .route("/{certname}/inventory", get(get_node_inventory))
+        .route(
+            "/{certname}/inventory/history",
+            get(get_node_inventory_history),
+        )
 }
 
 /// Public routes for node endpoints (no JWT required, uses client cert auth)
@@ -43,8 +52,19 @@ pub fn public_routes() -> Router<AppState> {
     Router::new()
         // Use /classify path to avoid conflict with protected /classification endpoint
         .route("/{certname}/classify", get(get_node_classification_public))
+        .route("/{certname}/inventory", post(ingest_node_inventory))
+        .route("/{certname}/update-jobs", get(get_pending_node_update_jobs))
+        .route(
+            "/{certname}/update-jobs/{job_id}/targets/{target_id}/results",
+            post(submit_node_update_job_result),
+        )
         // Environment-only endpoint (unauthenticated) - used early in Puppet agent run
         .route("/{certname}/environment", get(get_node_environment_public))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InventoryHistoryQuery {
+    pub limit: Option<usize>,
 }
 
 /// Query parameters for listing nodes
@@ -256,6 +276,38 @@ async fn get_node_reports(
     };
 
     Ok(Json(reports))
+}
+
+/// GET /api/v1/nodes/:certname/inventory
+async fn get_node_inventory(
+    State(state): State<AppState>,
+    Path(certname): Path<String>,
+) -> AppResult<Json<NodeInventory>> {
+    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let inventory = inventory_repo
+        .get_current_inventory(&certname)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch node inventory: {}", e)))?
+        .ok_or_else(|| {
+            AppError::NotFound(format!("Inventory for node '{}' not found", certname))
+        })?;
+
+    Ok(Json(inventory))
+}
+
+/// GET /api/v1/nodes/:certname/inventory/history
+async fn get_node_inventory_history(
+    State(state): State<AppState>,
+    Path(certname): Path<String>,
+    Query(query): Query<InventoryHistoryQuery>,
+) -> AppResult<Json<Vec<InventorySnapshotSummary>>> {
+    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let history = inventory_repo
+        .get_inventory_history(&certname, query.limit.unwrap_or(20).min(100))
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch inventory history: {}", e)))?;
+
+    Ok(Json(history))
 }
 
 /// Query parameters for node resources
@@ -495,43 +547,44 @@ async fn get_node_classification_public(
         .as_ref()
         .and_then(|c| c.shared_key.as_ref());
 
-    let authenticated = if let (Some(header_key), Some(config_key)) = (&shared_key_header, configured_shared_key) {
-        // Shared key authentication
-        if header_key == config_key {
-            tracing::debug!(
+    let authenticated =
+        if let (Some(header_key), Some(config_key)) = (&shared_key_header, configured_shared_key) {
+            // Shared key authentication
+            if header_key == config_key {
+                tracing::debug!(
                 "Classification: Shared key authentication successful for node '{}' (debug mode)",
                 certname
             );
-            true
+                true
+            } else {
+                tracing::warn!(
+                    "Classification: Invalid shared key provided for node '{}'",
+                    certname
+                );
+                false
+            }
+        } else if let Some(ref cert) = client_cert.0 {
+            // Client certificate authentication
+            if cert.matches_certname(&certname) {
+                tracing::debug!(
+                    "Classification: Client certificate authentication successful for node '{}'",
+                    certname
+                );
+                true
+            } else {
+                tracing::warn!(
+                    "Classification: Certificate CN '{}' does not match requested certname '{}'",
+                    cert.cn,
+                    certname
+                );
+                return Err(AppError::Forbidden(format!(
+                    "Certificate CN '{}' does not match requested node '{}'",
+                    cert.cn, certname
+                )));
+            }
         } else {
-            tracing::warn!(
-                "Classification: Invalid shared key provided for node '{}'",
-                certname
-            );
             false
-        }
-    } else if let Some(ref cert) = client_cert.0 {
-        // Client certificate authentication
-        if cert.matches_certname(&certname) {
-            tracing::debug!(
-                "Classification: Client certificate authentication successful for node '{}'",
-                certname
-            );
-            true
-        } else {
-            tracing::warn!(
-                "Classification: Certificate CN '{}' does not match requested certname '{}'",
-                cert.cn,
-                certname
-            );
-            return Err(AppError::Forbidden(format!(
-                "Certificate CN '{}' does not match requested node '{}'",
-                cert.cn, certname
-            )));
-        }
-    } else {
-        false
-    };
+        };
 
     if !authenticated {
         return Err(AppError::Unauthorized(
@@ -585,6 +638,68 @@ async fn get_node_classification_public(
     );
 
     Ok(Json(classification))
+}
+
+/// POST /api/v1/nodes/:certname/inventory
+async fn ingest_node_inventory(
+    State(state): State<AppState>,
+    Path(certname): Path<String>,
+    headers: HeaderMap,
+    client_cert: OptionalClientCert,
+    Json(payload): Json<InventoryPayload>,
+) -> AppResult<(StatusCode, Json<NodeInventory>)> {
+    authenticate_node_request(&state, &certname, &headers, &client_cert)?;
+
+    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let inventory = inventory_repo
+        .ingest_inventory(&certname, &payload)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to ingest node inventory: {}", e)))?;
+
+    Ok((StatusCode::CREATED, Json(inventory)))
+}
+
+/// GET /api/v1/nodes/:certname/update-jobs
+async fn get_pending_node_update_jobs(
+    State(state): State<AppState>,
+    Path(certname): Path<String>,
+    headers: HeaderMap,
+    client_cert: OptionalClientCert,
+) -> AppResult<Json<Vec<NodePendingUpdateJob>>> {
+    authenticate_node_request(&state, &certname, &headers, &client_cert)?;
+
+    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let jobs = inventory_repo
+        .claim_pending_updates_for_node(&certname)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch pending update jobs: {}", e)))?;
+
+    Ok(Json(jobs))
+}
+
+/// POST /api/v1/nodes/:certname/update-jobs/:job_id/targets/:target_id/results
+async fn submit_node_update_job_result(
+    State(state): State<AppState>,
+    Path((certname, job_id, target_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    client_cert: OptionalClientCert,
+    Json(payload): Json<SubmitUpdateJobResultRequest>,
+) -> AppResult<Json<UpdateJob>> {
+    authenticate_node_request(&state, &certname, &headers, &client_cert)?;
+
+    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let job = inventory_repo
+        .submit_update_job_result(&job_id, &target_id, &certname, &payload)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to submit update job result: {}", e)))?
+        .ok_or_else(|| {
+            AppError::NotFound(format!(
+                "Update job target '{}' for node '{}' was not found",
+                target_id, certname
+            ))
+        })?;
+
+    Ok(Json(job))
 }
 
 /// Response for environment-only endpoint
@@ -663,6 +778,51 @@ async fn get_node_environment_public(
     }))
 }
 
+fn authenticate_node_request(
+    state: &AppState,
+    certname: &str,
+    headers: &HeaderMap,
+    client_cert: &OptionalClientCert,
+) -> AppResult<()> {
+    let shared_key_header = headers
+        .get("X-Classification-Key")
+        .and_then(|v| v.to_str().ok());
+    let configured_shared_key = state
+        .config
+        .classification
+        .as_ref()
+        .and_then(|c| c.shared_key.as_deref());
+
+    if let (Some(header_key), Some(config_key)) = (shared_key_header, configured_shared_key) {
+        if header_key == config_key {
+            return Ok(());
+        }
+
+        tracing::warn!(
+            "Node public auth: invalid shared key provided for node '{}'",
+            certname
+        );
+        return Err(AppError::Unauthorized(
+            "Invalid X-Classification-Key header".to_string(),
+        ));
+    }
+
+    if let Some(ref cert) = client_cert.0 {
+        if cert.matches_certname(certname) {
+            return Ok(());
+        }
+
+        return Err(AppError::Forbidden(format!(
+            "Certificate CN '{}' does not match requested node '{}'",
+            cert.cn, certname
+        )));
+    }
+
+    Err(AppError::Unauthorized(
+        "Client certificate or shared key required. Provide X-SSL-Client-CN header or X-Classification-Key header.".to_string(),
+    ))
+}
+
 /// Response for node deletion
 #[derive(Debug, Serialize)]
 pub struct DeleteNodeResponse {
@@ -702,7 +862,9 @@ async fn delete_node(
     )
     .map_err(|e| match e {
         RbacError::PermissionDenied { reason, .. } => AppError::Forbidden(reason),
-        RbacError::NotAuthenticated => AppError::Unauthorized("Authentication required".to_string()),
+        RbacError::NotAuthenticated => {
+            AppError::Unauthorized("Authentication required".to_string())
+        }
         RbacError::RoleNotFound(name) => AppError::Internal(format!("Role not found: {}", name)),
     })?;
 
@@ -718,7 +880,11 @@ async fn delete_node(
         .remove_all_pinned_for_certname(&certname)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to remove pinned associations for '{}': {}", certname, e);
+            tracing::error!(
+                "Failed to remove pinned associations for '{}': {}",
+                certname,
+                e
+            );
             AppError::Internal(format!("Failed to remove pinned associations: {}", e))
         })?;
 

@@ -1234,16 +1234,20 @@ mod tests {
 
     // Helper function to evaluate a condition
     fn evaluate_condition(condition: &AlertCondition, context: &serde_json::Value) -> bool {
-        let field_value = get_field_value(context, &condition.field);
+        let Some(field) = condition.field.as_deref() else {
+            return false;
+        };
+        let field_value = get_field_value(context, field);
+        let expected_value = condition.value.as_ref();
 
         match condition.operator.as_str() {
-            "eq" | "=" | "==" => field_value == Some(&condition.value),
-            "ne" | "!=" => field_value != Some(&condition.value),
-            "contains" => match (field_value, &condition.value) {
-                (Some(serde_json::Value::String(haystack)), serde_json::Value::String(needle)) => {
+            "eq" | "=" | "==" => field_value == expected_value,
+            "ne" | "!=" => field_value != expected_value,
+            "contains" => match (field_value, expected_value) {
+                (Some(serde_json::Value::String(haystack)), Some(serde_json::Value::String(needle))) => {
                     haystack.contains(needle)
                 }
-                (Some(serde_json::Value::Array(arr)), val) => arr.contains(val),
+                (Some(serde_json::Value::Array(arr)), Some(val)) => arr.contains(val),
                 _ => false,
             },
             _ => false,
@@ -1253,9 +1257,11 @@ mod tests {
     #[test]
     fn test_evaluate_condition_equals() {
         let condition = AlertCondition {
-            field: "status".to_string(),
+            condition_type: None,
             operator: "eq".to_string(),
-            value: json!("failed"),
+            value: Some(json!("failed")),
+            enabled: true,
+            field: Some("status".to_string()),
         };
 
         let context = json!({ "status": "failed" });
@@ -1268,9 +1274,11 @@ mod tests {
     #[test]
     fn test_evaluate_condition_contains() {
         let condition = AlertCondition {
-            field: "message".to_string(),
+            condition_type: None,
             operator: "contains".to_string(),
-            value: json!("error"),
+            value: Some(json!("error")),
+            enabled: true,
+            field: Some("message".to_string()),
         };
 
         let context = json!({ "message": "This is an error message" });
