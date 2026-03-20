@@ -9,6 +9,8 @@ pub mod cache;
 pub mod classification;
 pub mod code_deploy;
 pub mod code_deploy_scheduler;
+pub mod cve_feed;
+pub mod cve_scheduler;
 pub mod facter;
 pub mod git;
 pub mod inventory_scheduler;
@@ -34,6 +36,7 @@ pub use cache::{
 };
 pub use code_deploy::{CodeDeployConfig, CodeDeployService};
 pub use code_deploy_scheduler::{start_code_deploy_scheduler, CodeDeploySchedulerState};
+pub use cve_scheduler::{start_cve_scheduler, CveSchedulerState};
 pub use facter::{ExportFormat, FacterService, GeneratedFacts};
 pub use git::{BranchInfo, CommitInfo, GitService, GitServiceConfig};
 pub use inventory_scheduler::{start_inventory_scheduler, InventorySchedulerState};

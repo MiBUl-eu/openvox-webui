@@ -128,6 +128,18 @@ import type {
   UpdateJob,
   CreateUpdateJobRequest,
   ApproveUpdateJobRequest,
+  // CVE types
+  CveFeedSource,
+  CreateCveFeedSourceRequest,
+  UpdateCveFeedSourceRequest,
+  CveEntry,
+  CveDetailResponse,
+  HostVulnerabilityMatch,
+  NodeVulnerabilitySummary,
+  VulnerabilityDashboardReport,
+  FeedSyncResult,
+  UpdatePreviewRequest,
+  UpdatePreviewResponse,
 } from '../types';
 
 const client = axios.create({
@@ -1229,6 +1241,69 @@ export const nodeRemovalApi = {
 
   getNodeAuditLog: async (certname: string): Promise<NodeRemovalAudit[]> => {
     const response = await client.get(`/node-removal/audit/${encodeURIComponent(certname)}`);
+    return response.data;
+  },
+
+};
+
+// CVE / Vulnerability API - separated to avoid TypeScript object literal property limit
+export const cveApi = {
+  getVulnerabilityDashboard: async (): Promise<VulnerabilityDashboardReport> => {
+    const response = await client.get('/cve/dashboard');
+    return response.data;
+  },
+
+  getVulnerableNodes: async (severity?: string, limit?: number): Promise<NodeVulnerabilitySummary[]> => {
+    const response = await client.get('/cve/nodes', { params: { severity, limit } });
+    return response.data;
+  },
+
+  getNodeVulnerabilities: async (certname: string): Promise<HostVulnerabilityMatch[]> => {
+    const response = await client.get(`/cve/nodes/${encodeURIComponent(certname)}`);
+    return response.data;
+  },
+
+  searchCves: async (query?: string, severity?: string, isKev?: boolean, limit?: number): Promise<CveEntry[]> => {
+    const response = await client.get('/cve/entries', { params: { query, severity, is_kev: isKev, limit } });
+    return response.data;
+  },
+
+  getCveDetail: async (cveId: string): Promise<CveDetailResponse> => {
+    const response = await client.get(`/cve/entries/${encodeURIComponent(cveId)}`);
+    return response.data;
+  },
+
+  getCveFeeds: async (): Promise<CveFeedSource[]> => {
+    const response = await client.get('/cve/feeds');
+    return response.data;
+  },
+
+  createCveFeed: async (request: CreateCveFeedSourceRequest): Promise<CveFeedSource> => {
+    const response = await client.post('/cve/feeds', request);
+    return response.data;
+  },
+
+  updateCveFeed: async (id: string, request: UpdateCveFeedSourceRequest): Promise<CveFeedSource> => {
+    const response = await client.put(`/cve/feeds/${id}`, request);
+    return response.data;
+  },
+
+  deleteCveFeed: async (id: string): Promise<void> => {
+    await client.delete(`/cve/feeds/${id}`);
+  },
+
+  triggerFeedSync: async (id: string): Promise<FeedSyncResult> => {
+    const response = await client.post(`/cve/feeds/${id}/sync`);
+    return response.data;
+  },
+
+  triggerMatchRefresh: async (): Promise<{ matches_refreshed: number }> => {
+    const response = await client.post('/cve/refresh-matches');
+    return response.data;
+  },
+
+  previewUpdateJob: async (request: UpdatePreviewRequest): Promise<UpdatePreviewResponse> => {
+    const response = await client.post('/inventory/updates/preview', request);
     return response.data;
   },
 };

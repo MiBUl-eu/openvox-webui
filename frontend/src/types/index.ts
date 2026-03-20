@@ -218,7 +218,8 @@ export type UpdateOperationType =
   | 'package_update'
   | 'package_install'
   | 'package_remove'
-  | 'system_patch';
+  | 'system_patch'
+  | 'security_patch';
 
 export interface UpdateJobTarget {
   id: string;
@@ -1869,4 +1870,168 @@ export interface BootstrapConfigResponse {
   repository_base_url?: string | null;
   agent_package_name: string;
   webui_url: string;
+}
+
+// ============================================================================
+// CVE / Vulnerability Types
+// ============================================================================
+
+export type CveFeedType = 'nvd_json' | 'cisa_kev' | 'custom';
+export type CveSeverity = 'critical' | 'high' | 'medium' | 'low' | 'unknown';
+
+export interface CveFeedSource {
+  id: string;
+  name: string;
+  feed_url: string;
+  feed_type: CveFeedType;
+  enabled: boolean;
+  last_sync_at?: string | null;
+  last_sync_status: string;
+  last_sync_error?: string | null;
+  sync_interval_secs: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateCveFeedSourceRequest {
+  name: string;
+  feed_url: string;
+  feed_type: CveFeedType;
+  enabled?: boolean;
+  sync_interval_secs?: number;
+}
+
+export interface UpdateCveFeedSourceRequest {
+  name?: string;
+  feed_url?: string;
+  enabled?: boolean;
+  sync_interval_secs?: number;
+}
+
+export interface CveEntry {
+  id: string;
+  feed_source_id: string;
+  description?: string | null;
+  severity: CveSeverity;
+  cvss_score?: number | null;
+  cvss_vector?: string | null;
+  published_at?: string | null;
+  modified_at?: string | null;
+  references: string[];
+  affected_products: string[];
+  is_kev: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HostVulnerabilityMatch {
+  id: string;
+  certname: string;
+  cve_id: string;
+  package_name: string;
+  installed_version: string;
+  severity: CveSeverity;
+  cvss_score?: number | null;
+  is_kev: boolean;
+  matched_at: string;
+}
+
+export interface NodeVulnerabilitySummary {
+  certname: string;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  kev_count: number;
+  total_count: number;
+  last_checked_at?: string | null;
+}
+
+export interface SeverityDistributionPoint {
+  severity: string;
+  count: number;
+}
+
+export interface TopCveItem {
+  cve_id: string;
+  severity: CveSeverity;
+  cvss_score?: number | null;
+  affected_nodes: number;
+  description?: string | null;
+  is_kev: boolean;
+}
+
+export interface TopVulnerableNode {
+  certname: string;
+  total_vulns: number;
+  critical_count: number;
+  kev_count: number;
+}
+
+export interface VulnerabilityDashboardReport {
+  total_vulnerable_nodes: number;
+  total_cves_matched: number;
+  severity_distribution: SeverityDistributionPoint[];
+  top_cves: TopCveItem[];
+  top_vulnerable_nodes: TopVulnerableNode[];
+  kev_count: number;
+  generated_at: string;
+}
+
+export interface CveDetailResponse {
+  entry: CveEntry;
+  affected_nodes: CveAffectedNode[];
+  package_matches: CvePackageMatch[];
+}
+
+export interface CveAffectedNode {
+  certname: string;
+  package_name: string;
+  installed_version: string;
+  matched_at: string;
+}
+
+export interface CvePackageMatch {
+  id: string;
+  cve_id: string;
+  package_name: string;
+  version_start?: string | null;
+  version_end?: string | null;
+  platform_family?: string | null;
+  created_at: string;
+}
+
+export interface FeedSyncResult {
+  feed_id: string;
+  entries_processed: number;
+  entries_new: number;
+  entries_updated: number;
+  package_matches_created: number;
+  errors: string[];
+  synced_at: string;
+}
+
+export interface UpdatePreviewRequest {
+  operation_type: UpdateOperationType;
+  package_names?: string[];
+  certnames?: string[];
+  group_id?: string | null;
+}
+
+export interface UpdatePreviewResponse {
+  targets: UpdatePreviewTarget[];
+  total_packages: number;
+  total_nodes: number;
+}
+
+export interface UpdatePreviewTarget {
+  certname: string;
+  packages_to_update: UpdatePreviewPackage[];
+}
+
+export interface UpdatePreviewPackage {
+  name: string;
+  from_version: string;
+  to_version: string;
+  cve_ids: string[];
 }

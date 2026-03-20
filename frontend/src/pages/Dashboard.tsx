@@ -27,8 +27,10 @@ import {
   RefreshCw,
   Activity,
   ArrowRight,
+  ShieldAlert,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useVulnerabilityDashboard } from '../hooks/useCve';
 import type { Node } from '../types';
 
 const COLORS = {
@@ -115,6 +117,8 @@ export default function Dashboard() {
     queryFn: api.getInventoryDashboard,
     retry: false,
   });
+
+  const { data: vulnDashboard } = useVulnerabilityDashboard();
 
   // Calculate stats from real node data
   const stats = useMemo(() => {
@@ -571,6 +575,57 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Vulnerability Overview */}
+      {vulnDashboard && vulnDashboard.total_cves_matched > 0 && (
+        <div className="card border-l-4 border-l-red-500">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-red-500" />
+              <h2 className="text-lg font-semibold text-gray-900">Vulnerability Overview</h2>
+            </div>
+            <Link
+              to="/updates"
+              className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
+            >
+              View details <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="text-center p-3 bg-gray-50 rounded-lg">
+              <p className="text-2xl font-bold text-gray-900">{vulnDashboard.total_cves_matched}</p>
+              <p className="text-xs text-gray-500">Total CVEs</p>
+            </div>
+            <div className="text-center p-3 bg-red-50 rounded-lg">
+              <p className="text-2xl font-bold text-red-700">
+                {vulnDashboard.severity_distribution.find((s) => s.severity === 'critical')?.count ?? 0}
+              </p>
+              <p className="text-xs text-red-600">Critical</p>
+            </div>
+            <div className="text-center p-3 bg-orange-50 rounded-lg">
+              <p className="text-2xl font-bold text-orange-700">
+                {vulnDashboard.severity_distribution.find((s) => s.severity === 'high')?.count ?? 0}
+              </p>
+              <p className="text-xs text-orange-600">High</p>
+            </div>
+            <div className="text-center p-3 bg-yellow-50 rounded-lg">
+              <p className="text-2xl font-bold text-yellow-700">
+                {vulnDashboard.severity_distribution.find((s) => s.severity === 'medium')?.count ?? 0}
+              </p>
+              <p className="text-xs text-yellow-600">Medium</p>
+            </div>
+            <div className="text-center p-3 bg-red-50 rounded-lg">
+              <p className="text-2xl font-bold text-red-700">{vulnDashboard.kev_count}</p>
+              <p className="text-xs text-red-600">Known Exploited</p>
+            </div>
+          </div>
+          {vulnDashboard.total_vulnerable_nodes > 0 && (
+            <p className="text-sm text-gray-600 mt-3">
+              {vulnDashboard.total_vulnerable_nodes} {vulnDashboard.total_vulnerable_nodes === 1 ? 'node' : 'nodes'} affected
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Bottom Section: Node Health and Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

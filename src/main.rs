@@ -233,6 +233,22 @@ async fn main() -> Result<()> {
     info!("Initializing notification service");
     let notification_service = Arc::new(NotificationService::new(db.clone()));
 
+    // Initialize CVE vulnerability scheduler if enabled
+    let _cve_scheduler = if let Some(ref cve_cfg) = config.cve {
+        if cve_cfg.enabled {
+            info!(
+                "CVE feed sync enabled (sync: {}s, match refresh: {}s)",
+                cve_cfg.sync_interval_secs, cve_cfg.match_refresh_interval_secs
+            );
+            Some(services::start_cve_scheduler(db.clone(), cve_cfg.clone(), Some(notification_service.clone())))
+        } else {
+            info!("CVE feed sync is disabled");
+            None
+        }
+    } else {
+        None
+    };
+
     // Create application state
     let state = AppState {
         config: config.clone(),

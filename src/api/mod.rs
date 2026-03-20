@@ -15,6 +15,7 @@ mod backup;
 mod bootstrap;
 mod ca;
 mod code_deploy;
+mod cve;
 mod facter;
 mod facts;
 mod groups;
@@ -92,6 +93,8 @@ pub fn protected_routes() -> Router<AppState> {
         .nest("/notifications", notifications::routes())
         // Inventory intelligence endpoints
         .nest("/inventory", inventory::routes())
+        // CVE vulnerability endpoints
+        .nest("/cve", cve::routes())
 }
 
 /// Create the full API router (public + protected; useful for tests)

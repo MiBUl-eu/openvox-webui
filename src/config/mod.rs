@@ -54,6 +54,9 @@ pub struct AppConfig {
     /// Inventory intelligence and scheduled update evaluation
     #[serde(default)]
     pub inventory: Option<InventoryConfig>,
+    /// CVE vulnerability feed configuration
+    #[serde(default)]
+    pub cve: Option<CveConfig>,
 }
 
 /// Server configuration
@@ -1215,6 +1218,50 @@ impl Default for InventoryConfig {
     }
 }
 
+/// CVE vulnerability feed configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CveConfig {
+    /// Enable CVE feed syncing and vulnerability matching
+    #[serde(default)]
+    pub enabled: bool,
+    /// Interval in seconds between feed syncs (default: 3600 = 1 hour)
+    #[serde(default = "default_cve_sync_interval")]
+    pub sync_interval_secs: u64,
+    /// Interval in seconds between vulnerability match refreshes (default: 1800 = 30 min)
+    #[serde(default = "default_cve_match_refresh_interval")]
+    pub match_refresh_interval_secs: u64,
+    /// Send alerts for new critical severity CVE matches
+    #[serde(default = "default_true_val")]
+    pub alert_on_critical: bool,
+    /// Send alerts for new Known Exploited Vulnerability matches
+    #[serde(default = "default_true_val")]
+    pub alert_on_kev: bool,
+}
+
+fn default_cve_sync_interval() -> u64 {
+    3600
+}
+
+fn default_cve_match_refresh_interval() -> u64 {
+    1800
+}
+
+fn default_true_val() -> bool {
+    true
+}
+
+impl Default for CveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            sync_interval_secs: default_cve_sync_interval(),
+            match_refresh_interval_secs: default_cve_match_refresh_interval(),
+            alert_on_critical: true,
+            alert_on_kev: true,
+        }
+    }
+}
+
 impl Default for NodeBootstrapConfig {
     fn default() -> Self {
         Self {
@@ -1369,6 +1416,7 @@ impl Default for AppConfig {
             node_bootstrap: None,
             classification: None,
             inventory: None,
+            cve: None,
         }
     }
 }

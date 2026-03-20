@@ -29,6 +29,7 @@ import {
   Layers3,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useNodeVulnerabilities } from '../hooks/useCve';
 import type {
   Report,
   NodeGroup,
@@ -36,6 +37,7 @@ import type {
   DeleteNodeResponse,
   NodeInventory,
   InventorySnapshotSummary,
+  HostVulnerabilityMatch,
 } from '../types';
 
 type TabId = 'overview' | 'inventory' | 'facts' | 'reports' | 'groups';
@@ -817,15 +819,105 @@ function GroupMembership({
   );
 }
 
+function getSeverityBadgeColor(severity: string): string {
+  switch (severity.toLowerCase()) {
+    case 'critical': return 'bg-red-100 text-red-800';
+    case 'high': return 'bg-orange-100 text-orange-800';
+    case 'medium': return 'bg-yellow-100 text-yellow-800';
+    case 'low': return 'bg-blue-100 text-blue-800';
+    default: return 'bg-gray-100 text-gray-800';
+  }
+}
+
+function VulnerabilityBanner({ vulnerabilities }: { vulnerabilities: HostVulnerabilityMatch[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const criticalCount = vulnerabilities.filter((v) => v.severity === 'critical').length;
+  const highCount = vulnerabilities.filter((v) => v.severity === 'high').length;
+  const kevCount = vulnerabilities.filter((v) => v.is_kev).length;
+
+  const bannerColor = criticalCount > 0 ? 'bg-red-50 border-red-200' : highCount > 0 ? 'bg-orange-50 border-orange-200' : 'bg-yellow-50 border-yellow-200';
+  const iconColor = criticalCount > 0 ? 'text-red-600' : highCount > 0 ? 'text-orange-600' : 'text-yellow-600';
+
+  return (
+    <div className={`rounded-lg border p-4 ${bannerColor}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <AlertTriangle className={`w-5 h-5 ${iconColor}`} />
+          <div>
+            <p className="font-medium text-gray-900">
+              {vulnerabilities.length} {vulnerabilities.length === 1 ? 'vulnerability' : 'vulnerabilities'} detected
+            </p>
+            <div className="flex gap-3 text-sm text-gray-600 mt-0.5">
+              {criticalCount > 0 && <span className="text-red-700 font-medium">{criticalCount} Critical</span>}
+              {highCount > 0 && <span className="text-orange-700 font-medium">{highCount} High</span>}
+              {kevCount > 0 && <span className="text-red-700 font-medium">{kevCount} KEV (Known Exploited)</span>}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-1"
+        >
+          {expanded ? 'Hide' : 'Show'} details
+          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="text-left py-2 pr-4 font-medium text-gray-600">CVE ID</th>
+                <th className="text-left py-2 pr-4 font-medium text-gray-600">Severity</th>
+                <th className="text-left py-2 pr-4 font-medium text-gray-600">CVSS</th>
+                <th className="text-left py-2 pr-4 font-medium text-gray-600">Package</th>
+                <th className="text-left py-2 pr-4 font-medium text-gray-600">Installed Version</th>
+                <th className="text-left py-2 font-medium text-gray-600">KEV</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vulnerabilities
+                .sort((a, b) => {
+                  const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, unknown: 4 };
+                  return (order[a.severity] ?? 4) - (order[b.severity] ?? 4);
+                })
+                .map((vuln) => (
+                  <tr key={vuln.id} className="border-b border-gray-100">
+                    <td className="py-2 pr-4 font-mono text-xs">{vuln.cve_id}</td>
+                    <td className="py-2 pr-4">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getSeverityBadgeColor(vuln.severity)}`}>
+                        {vuln.severity}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-4">{vuln.cvss_score?.toFixed(1) ?? '-'}</td>
+                    <td className="py-2 pr-4 font-mono text-xs">{vuln.package_name}</td>
+                    <td className="py-2 pr-4 font-mono text-xs">{vuln.installed_version}</td>
+                    <td className="py-2">
+                      {vuln.is_kev && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">KEV</span>}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InventorySection({
+  certname,
   inventory,
   history,
   historyLoading,
 }: {
+  certname: string;
   inventory: NodeInventory | null | undefined;
   history: InventorySnapshotSummary[];
   historyLoading: boolean;
 }) {
+  const { data: vulnerabilities = [] } = useNodeVulnerabilities(certname);
   if (!inventory) {
     return (
       <div className="text-center py-10 text-gray-500">
@@ -980,6 +1072,11 @@ function InventorySection({
           </div>
         ))}
       </div>
+
+      {/* Vulnerability Warning Banner */}
+      {vulnerabilities.length > 0 && (
+        <VulnerabilityBanner vulnerabilities={vulnerabilities} />
+      )}
 
       <div>
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Inventory Summary</h3>
@@ -1905,6 +2002,7 @@ export default function NodeDetail() {
             </div>
           ) : (
             <InventorySection
+              certname={certname!}
               inventory={inventory}
               history={inventoryHistory}
               historyLoading={inventoryHistoryLoading}

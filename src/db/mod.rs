@@ -12,6 +12,7 @@ pub mod api_key_repository;
 pub mod audit_repository;
 pub mod backup_repository;
 pub mod code_deploy_repository;
+pub mod cve_repository;
 pub mod inventory_repository;
 pub mod migrations;
 pub mod node_removal_repository;
@@ -30,6 +31,7 @@ pub use code_deploy_repository::{
     CodeDeploymentRepository, CodeEnvironmentRepository, CodePatTokenRepository,
     CodeRepositoryRepository, CodeSshKeyRepository,
 };
+pub use cve_repository::CveRepository;
 pub use inventory_repository::InventoryRepository;
 pub use node_removal_repository::NodeRemovalRepository;
 pub use organization_repository::OrganizationRepository;
@@ -99,6 +101,11 @@ const REQUIRED_TABLES: &[&str] = &[
     "update_jobs",
     "update_job_targets",
     "update_job_results",
+    // CVE vulnerability tables
+    "cve_feed_sources",
+    "cve_entries",
+    "cve_package_matches",
+    "host_vulnerability_matches",
 ];
 
 /// Database connection pool type

@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `purge_allowlist` to generated `r10k.yaml` to protect deployment marker files
 
 ### Added
+- Updates management page with 4 tabs: Update Status, Update Jobs, Version Catalog, and Vulnerabilities
+- Update dispatcher with 3 scope options: All Updates, Selected Packages, and Security Updates Only
+- CVE vulnerability detection with NVD 2.0 and CISA KEV feed integration
+- Configurable CVE feed sources in Settings with add/edit/delete/sync controls
+- Vulnerability dashboard on Dashboard page showing severity distribution and affected nodes
+- Node-level vulnerability warnings in Inventory tab with expandable CVE details table
+- Background CVE feed sync and vulnerability match scheduler with configurable intervals
+- `SecurityPatch` update operation type that auto-resolves vulnerable packages from CVE matches
+- Dry-run preview endpoint for update jobs showing per-node package changes
+- `Vulnerability` alert rule type with notifications for critical/KEV matches
 - Phase 10.2 Puppet-side inventory collectors for Linux, Windows, and macOS with package/application, website, and runtime discovery
 - `openvox_inventory_status` fact for inventory collection status and submission summary
 - `openvox_webui::client` options to enable inventory collection, control submission, and cap collected item counts
