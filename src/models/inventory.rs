@@ -310,6 +310,7 @@ pub enum UpdateOperationType {
     PackageInstall,
     PackageRemove,
     SystemPatch,
+    SecurityPatch,
 }
 
 impl UpdateOperationType {
@@ -319,6 +320,7 @@ impl UpdateOperationType {
             Self::PackageInstall => "package_install",
             Self::PackageRemove => "package_remove",
             Self::SystemPatch => "system_patch",
+            Self::SecurityPatch => "security_patch",
         }
     }
 
@@ -328,6 +330,7 @@ impl UpdateOperationType {
             "package_install" => Some(Self::PackageInstall),
             "package_remove" => Some(Self::PackageRemove),
             "system_patch" => Some(Self::SystemPatch),
+            "security_patch" => Some(Self::SecurityPatch),
             _ => None,
         }
     }

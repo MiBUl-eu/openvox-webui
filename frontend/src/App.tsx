@@ -20,6 +20,7 @@ const Facts = lazy(() => import('./pages/Facts'));
 const FacterTemplates = lazy(() => import('./pages/FacterTemplates'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Alerting = lazy(() => import('./pages/Alerting'));
+const Updates = lazy(() => import('./pages/Updates'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Roles = lazy(() => import('./pages/Roles'));
 const Users = lazy(() => import('./pages/Users'));
@@ -99,6 +100,7 @@ function App() {
                       <Route path="/facter-templates" element={<FacterTemplates />} />
                       <Route path="/analytics" element={<Analytics />} />
                       <Route path="/alerting" element={<Alerting />} />
+                      <Route path="/updates" element={<Updates />} />
                       <Route path="/profile" element={<Profile />} />
                       <Route
                         path="/roles"

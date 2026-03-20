@@ -10,11 +10,13 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
-    db::{repository::GroupRepository, InventoryRepository},
+    db::{repository::GroupRepository, CveRepository, InventoryRepository},
     middleware::AuthUser,
     models::{
         ApproveUpdateJobRequest, CreateUpdateJobRequest, InventoryDashboardReport,
         InventoryFleetStatusSummary, RepositoryVersionCatalogEntry, UpdateJob,
+        UpdateOperationType, UpdatePreviewPackage, UpdatePreviewRequest, UpdatePreviewResponse,
+        UpdatePreviewTarget,
     },
     utils::error::{AppError, AppResult},
     AppState,
@@ -23,6 +25,7 @@ use crate::{
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/updates", get(list_update_jobs).post(create_update_job))
+        .route("/updates/preview", post(preview_update_job))
         .route("/updates/{job_id}", get(get_update_job))
         .route("/updates/{job_id}/approve", post(approve_update_job))
         .route("/dashboard", get(get_inventory_dashboard))
@@ -181,11 +184,38 @@ async fn create_update_job(
         ));
     }
 
+    // For SecurityPatch, resolve vulnerable packages from CVE matches
+    let mut package_names = payload.package_names.clone();
+    if payload.operation_type == UpdateOperationType::SecurityPatch && package_names.is_empty() {
+        let cve_repo = CveRepository::new(state.db.clone());
+        let vuln_packages = cve_repo
+            .get_vulnerable_packages_for_nodes(&certnames)
+            .await
+            .map_err(|e| {
+                AppError::Internal(format!("Failed to resolve security packages: {}", e))
+            })?;
+
+        // Collect all unique vulnerable package names across all targets
+        let mut all_packages: Vec<String> = vuln_packages
+            .into_iter()
+            .flat_map(|(_, pkgs)| pkgs)
+            .collect();
+        all_packages.sort();
+        all_packages.dedup();
+        package_names = all_packages;
+
+        if package_names.is_empty() {
+            return Err(AppError::bad_request(
+                "No vulnerable packages found for the selected nodes",
+            ));
+        }
+    }
+
     let repo = InventoryRepository::new(state.db.clone());
     let job = repo
         .create_update_job(
             payload.operation_type,
-            &payload.package_names,
+            &package_names,
             payload.group_id.as_deref(),
             &certnames,
             payload.requires_approval,
@@ -217,4 +247,108 @@ async fn approve_update_job(
         .ok_or_else(|| AppError::NotFound(format!("Update job '{}' not found", job_id)))?;
 
     Ok(Json(job))
+}
+
+async fn preview_update_job(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Json(payload): Json<UpdatePreviewRequest>,
+) -> AppResult<Json<UpdatePreviewResponse>> {
+    require_inventory_update_read(&auth_user)?;
+
+    let mut certnames = payload.certnames.clone();
+    if let Some(group_id) = payload.group_id.as_deref() {
+        let group_uuid = Uuid::parse_str(group_id)
+            .map_err(|_| AppError::bad_request("group_id must be a valid UUID"))?;
+        let group_repo = GroupRepository::new(&state.db);
+        let mut group_nodes = group_repo
+            .get_group_nodes(group_uuid)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to resolve target group: {}", e)))?;
+        certnames.append(&mut group_nodes);
+    }
+    certnames.sort();
+    certnames.dedup();
+    certnames.retain(|c| !c.trim().is_empty());
+
+    let inv_repo = InventoryRepository::new(state.db.clone());
+    let cve_repo = CveRepository::new(state.db.clone());
+
+    let mut targets: Vec<UpdatePreviewTarget> = Vec::new();
+    let mut total_packages = 0;
+
+    for certname in &certnames {
+        let update_status = inv_repo
+            .get_host_update_status(certname)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to get update status: {}", e)))?;
+
+        let outdated_items = update_status
+            .map(|s| s.outdated_items)
+            .unwrap_or_default();
+
+        let mut packages_to_update: Vec<UpdatePreviewPackage> = Vec::new();
+
+        for item in &outdated_items {
+            match payload.operation_type {
+                UpdateOperationType::SecurityPatch => {
+                    let cve_ids = cve_repo
+                        .get_cve_ids_for_package(certname, &item.name)
+                        .await
+                        .unwrap_or_default();
+                    if !cve_ids.is_empty() {
+                        packages_to_update.push(UpdatePreviewPackage {
+                            name: item.name.clone(),
+                            from_version: item.installed_version.clone(),
+                            to_version: item.latest_version.clone(),
+                            cve_ids,
+                        });
+                    }
+                }
+                UpdateOperationType::PackageUpdate => {
+                    if payload.package_names.is_empty()
+                        || payload.package_names.iter().any(|p| p == &item.name)
+                    {
+                        let cve_ids = cve_repo
+                            .get_cve_ids_for_package(certname, &item.name)
+                            .await
+                            .unwrap_or_default();
+                        packages_to_update.push(UpdatePreviewPackage {
+                            name: item.name.clone(),
+                            from_version: item.installed_version.clone(),
+                            to_version: item.latest_version.clone(),
+                            cve_ids,
+                        });
+                    }
+                }
+                UpdateOperationType::SystemPatch => {
+                    let cve_ids = cve_repo
+                        .get_cve_ids_for_package(certname, &item.name)
+                        .await
+                        .unwrap_or_default();
+                    packages_to_update.push(UpdatePreviewPackage {
+                        name: item.name.clone(),
+                        from_version: item.installed_version.clone(),
+                        to_version: item.latest_version.clone(),
+                        cve_ids,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        total_packages += packages_to_update.len();
+        if !packages_to_update.is_empty() {
+            targets.push(UpdatePreviewTarget {
+                certname: certname.clone(),
+                packages_to_update,
+            });
+        }
+    }
+
+    Ok(Json(UpdatePreviewResponse {
+        total_nodes: targets.len(),
+        total_packages,
+        targets,
+    }))
 }

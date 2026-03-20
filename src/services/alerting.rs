@@ -377,6 +377,10 @@ impl AlertingService {
             AlertRuleType::Compliance => self.evaluate_compliance_rule(rule).await,
             AlertRuleType::Drift => self.evaluate_drift_rule(rule).await,
             AlertRuleType::ReportFailure => self.evaluate_report_failure_rule(rule).await,
+            AlertRuleType::Vulnerability => {
+                // Vulnerability alerts are triggered by the CVE scheduler, not rule evaluation
+                Ok(None)
+            }
             AlertRuleType::Custom => self.evaluate_custom_rule(rule).await,
         }
     }

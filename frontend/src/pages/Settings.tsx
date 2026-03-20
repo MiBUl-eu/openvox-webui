@@ -22,6 +22,10 @@ import {
   EyeOff,
   Monitor,
   Mail,
+  ShieldAlert,
+  Trash2,
+  Plus,
+  Play,
 } from 'lucide-react';
 import {
   useSettings,
@@ -36,7 +40,16 @@ import {
   useUpdateSmtpSettings,
 } from '../hooks/useSettings';
 import { api } from '../services/api';
+import {
+  useCveFeeds,
+  useCreateCveFeed,
+  useUpdateCveFeed,
+  useDeleteCveFeed,
+  useTriggerFeedSync,
+  useTriggerMatchRefresh,
+} from '../hooks/useCve';
 import type {
+  CveFeedType,
   DashboardConfig,
   ValidateConfigResponse,
   ImportConfigResponse,
@@ -44,7 +57,7 @@ import type {
   PermissionDefinition,
 } from '../types';
 
-type TabId = 'general' | 'dashboard' | 'rbac' | 'import-export' | 'smtp' | 'server';
+type TabId = 'general' | 'dashboard' | 'rbac' | 'import-export' | 'smtp' | 'server' | 'cve-feeds';
 
 interface Tab {
   id: TabId;
@@ -59,6 +72,7 @@ const tabs: Tab[] = [
   { id: 'smtp', name: 'Email/SMTP', icon: Mail },
   { id: 'import-export', name: 'Import/Export', icon: FileCode },
   { id: 'server', name: 'Server Info', icon: Server },
+  { id: 'cve-feeds', name: 'CVE Feeds', icon: ShieldAlert },
 ];
 
 export default function Settings() {
@@ -102,6 +116,7 @@ export default function Settings() {
         {activeTab === 'smtp' && <SmtpSettingsTab />}
         {activeTab === 'import-export' && <ImportExportTab />}
         {activeTab === 'server' && <ServerInfoTab />}
+        {activeTab === 'cve-feeds' && <CveFeedsTab />}
       </div>
     </div>
   );
@@ -1264,6 +1279,184 @@ function SmtpSettingsTab() {
             </div>
           )}
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// CVE Feeds Tab
+// ============================================================================
+
+function CveFeedsTab() {
+  const { data: feeds, isLoading } = useCveFeeds();
+  const createFeed = useCreateCveFeed();
+  const updateFeed = useUpdateCveFeed();
+  const deleteFeed = useDeleteCveFeed();
+  const syncFeed = useTriggerFeedSync();
+  const refreshMatches = useTriggerMatchRefresh();
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newUrl, setNewUrl] = useState('');
+  const [newType, setNewType] = useState<CveFeedType>('nvd_json');
+  const [newInterval, setNewInterval] = useState(3600);
+
+  const handleAdd = async () => {
+    try {
+      await createFeed.mutateAsync({
+        name: newName,
+        feed_url: newUrl,
+        feed_type: newType,
+        enabled: true,
+        sync_interval_secs: newInterval,
+      });
+      setShowAdd(false);
+      setNewName('');
+      setNewUrl('');
+    } catch { /* handled by mutation */ }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white shadow rounded-lg p-6">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h3 className="text-lg font-medium text-gray-900">CVE Feed Sources</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Configure vulnerability feed sources for CVE detection. Feeds are synced automatically when enabled.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => refreshMatches.mutate()}
+              disabled={refreshMatches.isPending}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshMatches.isPending ? 'animate-spin' : ''}`} />
+              Refresh Matches
+            </button>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md text-sm hover:bg-primary-700"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Feed
+            </button>
+          </div>
+        </div>
+
+        {showAdd && (
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Name</label>
+                <input
+                  type="text" value={newName} onChange={e => setNewName(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm"
+                  placeholder="Feed name..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Type</label>
+                <select value={newType} onChange={e => setNewType(e.target.value as CveFeedType)}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
+                  <option value="nvd_json">NVD JSON</option>
+                  <option value="cisa_kev">CISA KEV</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Feed URL</label>
+              <input
+                type="url" value={newUrl} onChange={e => setNewUrl(e.target.value)}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm"
+                placeholder="https://..."
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Sync Interval (seconds)</label>
+              <input
+                type="number" value={newInterval} onChange={e => setNewInterval(Number(e.target.value))}
+                min={300}
+                className="mt-1 block w-32 rounded-md border-gray-300 shadow-sm text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handleAdd} disabled={!newName || !newUrl || createFeed.isPending}
+                className="px-4 py-2 bg-primary-600 text-white rounded-md text-sm hover:bg-primary-700 disabled:opacity-50">
+                {createFeed.isPending ? 'Adding...' : 'Add Feed'}
+              </button>
+              <button onClick={() => setShowAdd(false)} className="px-4 py-2 border rounded-md text-sm text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="flex justify-center py-8"><RefreshCw className="h-6 w-6 animate-spin text-gray-400" /></div>
+        ) : !feeds || feeds.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            <ShieldAlert className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+            <p className="text-sm">No CVE feeds configured. Add a feed to start vulnerability detection.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {feeds.map(feed => (
+              <div key={feed.id} className="border rounded-lg p-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-medium text-gray-900">{feed.name}</h4>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        feed.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {feed.enabled ? 'Enabled' : 'Disabled'}
+                      </span>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{feed.feed_type}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1 font-mono">{feed.feed_url}</p>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Last sync: {feed.last_sync_at ? new Date(feed.last_sync_at).toLocaleString() : 'Never'}
+                      {feed.last_sync_status !== 'never' && (
+                        <span className={`ml-2 ${feed.last_sync_status === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                          ({feed.last_sync_status})
+                        </span>
+                      )}
+                      {feed.last_sync_error && (
+                        <span className="ml-2 text-red-500" title={feed.last_sync_error}>Error</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => syncFeed.mutate(feed.id)}
+                      disabled={syncFeed.isPending}
+                      className="inline-flex items-center px-2 py-1 text-xs border rounded text-gray-700 hover:bg-gray-50"
+                      title="Sync now"
+                    >
+                      <Play className={`h-3 w-3 mr-1 ${syncFeed.isPending ? 'animate-spin' : ''}`} />
+                      Sync
+                    </button>
+                    <button
+                      onClick={() => updateFeed.mutate({ id: feed.id, request: { enabled: !feed.enabled } })}
+                      className="px-2 py-1 text-xs border rounded text-gray-700 hover:bg-gray-50"
+                    >
+                      {feed.enabled ? 'Disable' : 'Enable'}
+                    </button>
+                    <button
+                      onClick={() => { if (confirm('Delete this feed?')) deleteFeed.mutate(feed.id); }}
+                      className="px-2 py-1 text-xs border border-red-200 rounded text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

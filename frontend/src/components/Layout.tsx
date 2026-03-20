@@ -20,6 +20,7 @@ import {
   Info,
   Rocket,
   HardDrive,
+  RefreshCw,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../stores/authStore';
@@ -39,6 +40,7 @@ const navigation = [
   { name: 'Facter Templates', href: '/facter-templates', icon: FileCode2 },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
   { name: 'Alerting', href: '/alerting', icon: Bell },
+  { name: 'Updates', href: '/updates', icon: RefreshCw },
 ];
 
 const adminNavigation = [
