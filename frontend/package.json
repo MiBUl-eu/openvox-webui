@@ -1,6 +1,10 @@
 {
   "name": "openvox-webui-frontend",
+<<<<<<< Updated upstream
   "version": "0.29.4",
+=======
+  "version": "0.29.3",
+>>>>>>> Stashed changes
   "private": true,
   "type": "module",
   "scripts": {
