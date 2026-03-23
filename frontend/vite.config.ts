@@ -51,12 +51,19 @@ export default defineConfig(({ mode }) => {
       sourcemap: true,
       rollupOptions: {
         output: {
-          manualChunks: {
-            // Vendor chunks - separating large dependencies
-            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-            'vendor-query': ['@tanstack/react-query'],
-            'vendor-charts': ['recharts'],
-            'vendor-ui': ['lucide-react', 'zustand'],
+          manualChunks(id) {
+            if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/') || id.includes('node_modules/react-router-dom')) {
+              return 'vendor-react';
+            }
+            if (id.includes('node_modules/@tanstack/react-query')) {
+              return 'vendor-query';
+            }
+            if (id.includes('node_modules/recharts')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('node_modules/lucide-react') || id.includes('node_modules/zustand')) {
+              return 'vendor-ui';
+            }
           },
         },
       },
