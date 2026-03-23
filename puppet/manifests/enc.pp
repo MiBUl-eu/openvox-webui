@@ -186,6 +186,14 @@ class openvox_webui::enc (
     require => Group['openvox-webui'],
   }
 
+  # Ensure openvox-webui user is in the puppet group
+  # This allows openvox-webui to access the r10k cache directory
+  # (/opt/puppetlabs/puppet/cache/r10k) which is under puppet:puppet ownership
+  user { 'openvox-webui':
+    groups  => ['puppet'],
+    require => Group['openvox-webui'],
+  }
+
   # Ensure Puppet code environments directory exists
   # This prevents Puppet Server from failing to start if environments don't exist
   file { '/etc/puppetlabs/code/environments':

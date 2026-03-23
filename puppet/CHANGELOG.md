@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Add openvox-webui user to puppet group in ENC manifest for r10k cache directory access
+- Fix r10k deployments incorrectly marked as failed when killed by SIGSYS/SIGPIPE signal after successful completion
+
 ### Added
 - Inventory client now polls for and executes pending update jobs (system patch, security patch, package operations)
 - Version catalog and update statuses now refresh automatically after inventory submission
