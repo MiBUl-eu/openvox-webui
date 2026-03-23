@@ -65,8 +65,11 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 # Security hardening - System calls
 SystemCallArchitectures=native
 # Note: Using permissive filter - Rust async runtime needs various syscalls
+# Allow @system-service and @resources groups, then block @privileged but
+# re-allow chown/fchown/fchownat which r10k (Ruby) needs for module deployment
 SystemCallFilter=@system-service @resources
 SystemCallFilter=~@privileged
+SystemCallFilter=chown fchown fchownat lchown
 
 # Security hardening - Memory
 # Note: MemoryDenyWriteExecute disabled - Rust binaries may require W^X pages

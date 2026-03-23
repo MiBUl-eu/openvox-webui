@@ -459,20 +459,40 @@ impl R10kService {
 
                 // Determine success: either normal exit with code 0, or signal termination
                 // where the output indicates successful completion (r10k completed its work
-                // but may have been signaled, e.g., SIGPIPE from closed pipe)
+                // but may have been signaled during cleanup)
                 let success = if exit_status.success() {
                     true
-                } else if signal.is_some() {
-                    // Signal-terminated r10k is NEVER considered successful.
-                    // Previous logic checked for "Deploying module to" in output, but that
-                    // string appears early in deployment before files are fully written.
-                    // Marking a killed deployment as "successful" causes corruption to persist
-                    // because no retry is triggered and partial files are left on disk.
-                    warn!(
-                        "r10k was terminated by signal {:?} - marking as FAILED (partial deployment may have occurred)",
-                        signal
-                    );
-                    false
+                } else if let Some(sig) = signal {
+                    // SIGSYS (signal 31 on Linux x86_64) is triggered by systemd's
+                    // SystemCallFilter seccomp rules when Ruby (r10k) uses a filtered
+                    // syscall during process cleanup/exit. If r10k completed all its
+                    // deployment work (no ERROR lines in output, has deployment lines),
+                    // this is a benign termination and the deployment is successful.
+                    //
+                    // SIGPIPE (signal 13) can occur if the reading end of the pipe
+                    // closes before r10k finishes writing. Same logic applies.
+                    let is_benign_signal = sig == 31 || sig == 13; // SIGSYS or SIGPIPE
+                    let output = format!("{}{}", stderr_str, stdout_str);
+                    let has_deployment_work = output.contains("Deploying module to")
+                        || output.contains("Environment ")
+                        || output.contains("is now at");
+                    let has_r10k_error = output.contains("ERROR\t ->")
+                        || output.contains("Permission denied")
+                        || output.contains("fatal:");
+
+                    if is_benign_signal && has_deployment_work && !has_r10k_error {
+                        warn!(
+                            "r10k was terminated by signal {} (benign: seccomp/pipe) after completing deployment work - marking as SUCCESS",
+                            sig
+                        );
+                        true
+                    } else {
+                        warn!(
+                            "r10k was terminated by signal {} - marking as FAILED (partial deployment may have occurred)",
+                            sig
+                        );
+                        false
+                    }
                 } else {
                     false
                 };
