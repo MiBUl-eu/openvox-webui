@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `winget` as default Windows package repository source
 
 ### Fixed
+- Install base64 gem for r10k compatibility with Ruby 3.2 (puppet_forge requires >= 0.2.0, but Ruby 3.2 only ships 0.1.1)
 - Fix dashboard stats grid layout: 5 status cards now fit on a single row instead of wrapping
 - Fix Activity Heatmap showing "No activity data available" — now correctly parses PuppetDB raw metrics format (`{data: [...], href: "..."}`) in addition to pre-parsed format
 - Fix outdated software "Affected Nodes" count inflated by duplicate package entries (e.g., gpg-pubkey) — now counts unique nodes per package
