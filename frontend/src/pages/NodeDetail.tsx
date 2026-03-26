@@ -1564,7 +1564,7 @@ function InventorySection({
                           <p className="text-xs text-gray-400 font-mono truncate max-w-[200px]">{container.container_id}</p>
                         </td>
                         <td className="py-2 px-3">
-                          <span className="font-mono text-xs text-gray-700">{container.image}</span>
+                          <span className="font-mono text-xs text-gray-700">{container.image || '—'}</span>
                         </td>
                         <td className="py-2 px-3">
                           <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${

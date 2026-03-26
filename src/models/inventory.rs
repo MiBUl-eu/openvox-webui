@@ -98,7 +98,8 @@ pub struct HostRuntimeInventoryItem {
 pub struct HostContainerInventoryItem {
     pub container_id: String,
     pub name: String,
-    pub image: String,
+    #[serde(default)]
+    pub image: Option<String>,
     pub status: String,
     pub status_detail: Option<String>,
     pub created_at: Option<String>,

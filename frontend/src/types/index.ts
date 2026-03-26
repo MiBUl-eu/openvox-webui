@@ -105,7 +105,7 @@ export interface HostRuntimeInventoryItem {
 export interface HostContainerInventoryItem {
   container_id: string;
   name: string;
-  image: string;
+  image?: string | null;
   status: string;
   status_detail?: string | null;
   created_at?: string | null;
