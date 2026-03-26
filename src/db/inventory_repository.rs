@@ -1410,7 +1410,7 @@ impl InventoryRepository {
             .bind(snapshot_id)
             .bind(&container.container_id)
             .bind(&container.name)
-            .bind(&container.image)
+            .bind(container.image.as_deref().unwrap_or(""))
             .bind(&container.status)
             .bind(&container.status_detail)
             .bind(&container.created_at)
@@ -1970,7 +1970,7 @@ impl From<HostRuntimeInventoryRow> for HostRuntimeInventoryItem {
 struct HostContainerInventoryRow {
     container_id: String,
     name: String,
-    image: String,
+    image: Option<String>,
     status: String,
     status_detail: Option<String>,
     created_at: Option<String>,
