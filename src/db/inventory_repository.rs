@@ -2885,6 +2885,9 @@ mod tests {
                 deployed_units: vec!["ROOT.war".to_string()],
                 metadata: None,
             }],
+            containers: vec![],
+            users: vec![],
+            repositories: vec![],
         };
 
         let inventory = repo

@@ -76,6 +76,7 @@ pub struct HostApplicationInventoryItem {
 pub struct HostWebInventoryItem {
     pub server_type: String,
     pub site_name: String,
+    #[serde(default)]
     pub bindings: Vec<String>,
     pub document_root: Option<String>,
     pub application_pool: Option<String>,
@@ -90,6 +91,7 @@ pub struct HostRuntimeInventoryItem {
     pub runtime_version: Option<String>,
     pub install_path: Option<String>,
     pub management_endpoint: Option<String>,
+    #[serde(default)]
     pub deployed_units: Vec<String>,
     pub metadata: Option<serde_json::Value>,
 }
@@ -103,7 +105,9 @@ pub struct HostContainerInventoryItem {
     pub status: String,
     pub status_detail: Option<String>,
     pub created_at: Option<String>,
+    #[serde(default)]
     pub ports: Vec<String>,
+    #[serde(default)]
     pub mounts: Vec<String>,
     pub runtime_type: String,
     pub metadata: Option<serde_json::Value>,
@@ -118,6 +122,7 @@ pub struct HostUserInventoryItem {
     pub home_directory: Option<String>,
     pub shell: Option<String>,
     pub user_type: Option<String>,
+    #[serde(default)]
     pub groups: Vec<String>,
     pub last_login: Option<String>,
     pub locked: Option<bool>,
