@@ -83,7 +83,7 @@ validator = { version = "0.20", features = ["derive"] }
 printpdf = "0.9"
 
 # Cron scheduling
-cron = "0.15"
+cron = "0.16"
 
 # Git operations for code deploy
 git2 = "0.20"
