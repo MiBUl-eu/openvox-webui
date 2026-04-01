@@ -410,8 +410,6 @@ impl NotificationService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[tokio::test]
     async fn test_notification_creation() {
         // Basic test to ensure the module compiles correctly

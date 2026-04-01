@@ -308,6 +308,7 @@ pub fn test_config() -> AppConfig {
         backup: None,
         node_removal: None,
         node_bootstrap: None,
+        cve: None,
     }
 }
 

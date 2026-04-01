@@ -679,9 +679,8 @@ fn row_to_repository(row: RepositoryRow) -> CodeRepository {
 }
 
 fn generate_webhook_secret() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
+    let bytes: [u8; 32] = rand::random();
+
     base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes)
 }
 

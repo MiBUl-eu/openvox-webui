@@ -7,7 +7,6 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
-use rand::rngs::OsRng;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
@@ -26,7 +25,7 @@ impl AuthService {
 
     /// Hash a password using Argon2id
     pub fn hash_password(password: &str) -> Result<String> {
-        let salt = SaltString::generate(&mut OsRng);
+        let salt = SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
         let argon2 = Argon2::default();
         let password_hash = argon2
             .hash_password(password.as_bytes(), &salt)

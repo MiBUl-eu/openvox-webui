@@ -205,6 +205,7 @@ pub fn check_permission(
 ///     backup: None,
 ///     node_removal: None,
 ///     node_bootstrap: None,
+///     cve: None,
 /// };
 ///
 /// let db = openvox_webui::db::init_pool(&config.database).await.unwrap();
