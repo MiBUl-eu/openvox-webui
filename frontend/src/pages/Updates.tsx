@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   RefreshCw,
   Package,
@@ -10,6 +11,8 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  X,
+  Loader2,
 } from 'lucide-react';
 import {
   useUpdateJobs,
@@ -18,6 +21,8 @@ import {
   useCreateUpdateJob,
   useApproveUpdateJob,
   usePreviewUpdateJob,
+  useOutdatedSoftwareNodes,
+  useComplianceCategoryNodes,
 } from '../hooks/useUpdates';
 import {
   useVulnerabilityDashboard,
@@ -88,10 +93,17 @@ function SeverityBadge({ severity, count }: { severity: string; count?: number }
 // Update Status Tab
 // ============================================================================
 
-function UpdateStatusTab() {
+function UpdateStatusTab({ onSwitchTab }: { onSwitchTab: (tab: TabId) => void }) {
   const { data: dashboard, isLoading } = useInventoryDashboard();
   const { data: vulnDashboard } = useVulnerabilityDashboard();
   const [showDispatcher, setShowDispatcher] = useState(false);
+  const [selectedSoftware, setSelectedSoftware] = useState<{ name: string; softwareType: string } | null>(null);
+  const [selectedCompliance, setSelectedCompliance] = useState<string | null>(null);
+
+  const { data: softwareNodes = [], isLoading: softwareNodesLoading } =
+    useOutdatedSoftwareNodes(selectedSoftware?.name ?? null, selectedSoftware?.softwareType);
+  const { data: complianceNodes = [], isLoading: complianceNodesLoading } =
+    useComplianceCategoryNodes(selectedCompliance);
 
   if (isLoading) {
     return <div className="flex justify-center py-12"><RefreshCw className="h-8 w-8 animate-spin text-gray-400" /></div>;
@@ -107,18 +119,27 @@ function UpdateStatusTab() {
           <div className="text-sm font-medium text-gray-500">Nodes with Inventory</div>
           <div className="mt-1 text-2xl font-semibold">{summary?.nodes_with_inventory ?? 0}</div>
         </div>
-        <div className="bg-white rounded-lg border p-4">
+        <button
+          className="bg-white rounded-lg border p-4 text-left hover:ring-2 hover:ring-orange-300 transition-all cursor-pointer"
+          onClick={() => setSelectedCompliance('outdated')}
+        >
           <div className="text-sm font-medium text-gray-500">Outdated Nodes</div>
           <div className="mt-1 text-2xl font-semibold text-orange-600">{summary?.outdated_nodes ?? 0}</div>
-        </div>
-        <div className="bg-white rounded-lg border p-4">
+        </button>
+        <button
+          className="bg-white rounded-lg border p-4 text-left hover:ring-2 hover:ring-orange-300 transition-all cursor-pointer"
+          onClick={() => setSelectedCompliance('outdated')}
+        >
           <div className="text-sm font-medium text-gray-500">Outdated Packages</div>
           <div className="mt-1 text-2xl font-semibold text-orange-600">{summary?.outdated_packages ?? 0}</div>
-        </div>
-        <div className="bg-white rounded-lg border p-4">
+        </button>
+        <button
+          className="bg-white rounded-lg border p-4 text-left hover:ring-2 hover:ring-red-300 transition-all cursor-pointer"
+          onClick={() => onSwitchTab('vulnerabilities')}
+        >
           <div className="text-sm font-medium text-gray-500">Vulnerable Nodes</div>
           <div className="mt-1 text-2xl font-semibold text-red-600">{vulnDashboard?.total_vulnerable_nodes ?? 0}</div>
-        </div>
+        </button>
       </div>
 
       {/* Action bar */}
@@ -151,15 +172,161 @@ function UpdateStatusTab() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {dashboard.top_outdated_software.map((item, idx) => (
-                  <tr key={idx}>
+                {dashboard.top_outdated_software.map((item) => (
+                  <tr
+                    key={`${item.software_type}-${item.name}`}
+                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    onClick={() => setSelectedSoftware({ name: item.name, softwareType: item.software_type })}
+                  >
                     <td className="px-4 py-3 text-sm text-gray-900">{item.name}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{item.software_type}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{item.affected_nodes}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-orange-600">{item.affected_nodes}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Outdated Software Drill-Down Modal */}
+      {selectedSoftware && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setSelectedSoftware(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Nodes with outdated &ldquo;{selectedSoftware.name}&rdquo;
+              </h3>
+              <button
+                onClick={() => setSelectedSoftware(null)}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-6">
+              {softwareNodesLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
+                </div>
+              ) : softwareNodes.length === 0 ? (
+                <p className="text-center text-gray-500 py-8">No affected nodes found</p>
+              ) : (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Node</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Installed</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latest</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {softwareNodes.map((node) => (
+                      <tr key={node.certname} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <Link
+                            to={`/nodes/${encodeURIComponent(node.certname)}`}
+                            className="text-primary-600 hover:underline font-mono text-sm"
+                            onClick={() => setSelectedSoftware(null)}
+                          >
+                            {node.certname}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono text-red-600">
+                          {node.installed_version}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono text-green-600">
+                          {node.latest_version}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Compliance Category Drill-Down Modal */}
+      {selectedCompliance && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setSelectedCompliance(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-3xl w-full mx-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {selectedCompliance.charAt(0).toUpperCase() + selectedCompliance.slice(1)} Nodes
+              </h3>
+              <button
+                onClick={() => setSelectedCompliance(null)}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-6">
+              {complianceNodesLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
+                </div>
+              ) : complianceNodes.length === 0 ? (
+                <p className="text-center text-gray-500 py-8">No nodes in this category</p>
+              ) : (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Node</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Outdated Pkgs</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Outdated Apps</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Checked</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {complianceNodes.map((node) => (
+                      <tr key={node.certname} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <Link
+                            to={`/nodes/${encodeURIComponent(node.certname)}`}
+                            className="text-primary-600 hover:underline font-mono text-sm"
+                            onClick={() => setSelectedCompliance(null)}
+                          >
+                            {node.certname}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-right">
+                          {node.outdated_packages > 0 ? (
+                            <span className="text-orange-600 font-semibold">{node.outdated_packages}</span>
+                          ) : (
+                            <span className="text-green-600">0</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-right">
+                          {node.outdated_applications > 0 ? (
+                            <span className="text-orange-600 font-semibold">{node.outdated_applications}</span>
+                          ) : (
+                            <span className="text-green-600">0</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">
+                          {formatDate(node.checked_at)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -861,7 +1028,7 @@ export default function Updates() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'status' && <UpdateStatusTab />}
+      {activeTab === 'status' && <UpdateStatusTab onSwitchTab={setActiveTab} />}
       {activeTab === 'jobs' && <UpdateJobsTab />}
       {activeTab === 'catalog' && <VersionCatalogTab />}
       {activeTab === 'vulnerabilities' && <VulnerabilitiesTab />}

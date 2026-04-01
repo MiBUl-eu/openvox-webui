@@ -1021,7 +1021,7 @@ impl CodeDeployService {
 
     /// Verify webhook signature (GitHub)
     pub fn verify_github_signature(&self, secret: &str, payload: &[u8], signature: &str) -> bool {
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         use sha2::Sha256;
 
         let signature = match signature.strip_prefix("sha256=") {
@@ -1439,7 +1439,7 @@ mod tests {
 
     /// Test GitHub signature verification without needing a full service
     fn verify_github_signature_helper(secret: &str, payload: &[u8], signature: &str) -> bool {
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         use sha2::Sha256;
 
         let signature = match signature.strip_prefix("sha256=") {
@@ -1467,7 +1467,7 @@ mod tests {
         let payload = b"test payload";
 
         // Generate valid signature
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         use sha2::Sha256;
 
         let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();

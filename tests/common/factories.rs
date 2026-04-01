@@ -4,7 +4,7 @@
 //! and when you need unique data for each test.
 
 use chrono::Utc;
-use rand::Rng;
+use rand::RngExt;
 use uuid::Uuid;
 
 use openvox_webui::models::{
@@ -436,25 +436,25 @@ impl RoleBuilder {
 
 /// Generate random facts for a node
 pub fn random_facts() -> serde_json::Value {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let os_families = ["RedHat", "Debian", "Windows"];
-    let os_family = os_families[rng.gen_range(0..os_families.len())];
+    let os_family = os_families[rng.random_range(0..os_families.len())];
 
     let (os_name, major, minor) = match os_family {
         "RedHat" => {
             let names = ["Rocky", "AlmaLinux", "CentOS", "RHEL"];
-            (names[rng.gen_range(0..names.len())], "9", "2")
+            (names[rng.random_range(0..names.len())], "9", "2")
         }
         "Debian" => {
             let names = ["Ubuntu", "Debian"];
-            (names[rng.gen_range(0..names.len())], "22", "04")
+            (names[rng.random_range(0..names.len())], "22", "04")
         }
         "Windows" => ("Windows", "2022", ""),
         _ => ("Linux", "1", "0"),
     };
 
-    let memory_gb = rng.gen_range(4..128);
-    let cpu_count = rng.gen_range(1..64);
+    let memory_gb = rng.random_range(4..128);
+    let cpu_count = rng.random_range(1..64);
 
     serde_json::json!({
         "os": {
@@ -468,9 +468,9 @@ pub fn random_facts() -> serde_json::Value {
         },
         "kernel": if os_family == "Windows" { "windows" } else { "Linux" },
         "networking": {
-            "ip": format!("192.168.{}.{}", rng.gen_range(1..255), rng.gen_range(1..255)),
-            "hostname": format!("host{}", rng.gen_range(1..1000)),
-            "fqdn": format!("host{}.example.com", rng.gen_range(1..1000))
+            "ip": format!("192.168.{}.{}", rng.random_range(1..255), rng.random_range(1..255)),
+            "hostname": format!("host{}", rng.random_range(1..1000)),
+            "fqdn": format!("host{}.example.com", rng.random_range(1..1000))
         },
         "memory": {
             "system": {

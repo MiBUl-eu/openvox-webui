@@ -1,4 +1,4 @@
-import { Info, Github, Scale, ExternalLink } from 'lucide-react';
+import { Info, GitFork, Scale, ExternalLink } from 'lucide-react';
 
 declare const __APP_VERSION__: string;
 
@@ -85,7 +85,7 @@ export default function About() {
       <div className="card mb-6">
         <div className="flex items-center mb-4">
           <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mr-4">
-            <Github className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+            <GitFork className="w-6 h-6 text-gray-600 dark:text-gray-400" />
           </div>
           <div>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Links</h2>

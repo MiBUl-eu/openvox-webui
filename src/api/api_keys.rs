@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use base64::Engine;
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng;
 use serde::Deserialize;
 use sqlx::Row;
 use uuid::Uuid;
@@ -145,7 +145,7 @@ async fn create_api_key(
     // Create API key: use an id in the plaintext key so auth can look it up efficiently.
     let api_key_id = Uuid::new_v4();
     let mut secret_bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut secret_bytes);
+    rand::rng().fill_bytes(&mut secret_bytes);
     let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret_bytes);
     let key = format!("ovk_{}_{}", api_key_id, secret);
 
