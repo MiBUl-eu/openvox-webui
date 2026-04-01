@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `winget` as default Windows package repository source
 
 ### Fixed
+- Fix RPM/DEB package build failure caused by missing `react-is` peer dependency required by `recharts` v3
 - Fix inventory submission 422 error caused by container runtime entries missing the `image` field — make `image` optional in `HostContainerInventoryItem` so runtime-only entries (e.g. Docker Engine) are accepted
 - Install base64 gem for r10k compatibility with Ruby 3.2 (puppet_forge requires >= 0.2.0, but Ruby 3.2 only ships 0.1.1)
 - Fix dashboard stats grid layout: 5 status cards now fit on a single row instead of wrapping
