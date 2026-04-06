@@ -890,7 +890,7 @@ use crate::models::{
     CreateDriftBaselineRequest, CreateSavedReportRequest, CreateScheduleRequest, DriftBaseline,
     DriftToleranceConfig, ExecutionStatus, OutputFormat, ReportExecution, ReportQueryConfig,
     ReportSchedule, ReportTemplate, ReportType, SavedReport, SeverityLevel,
-    UpdateSavedReportRequest, UpdateScheduleRequest,
+    UpdateComplianceBaselineRequest, UpdateSavedReportRequest, UpdateScheduleRequest,
 };
 use chrono::{DateTime, Utc};
 
@@ -1673,6 +1673,46 @@ impl<'a> ComplianceBaselineRepository<'a> {
         self.get_by_id(id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Failed to retrieve created baseline"))
+    }
+
+    /// Update a baseline
+    pub async fn update(
+        &self,
+        id: Uuid,
+        req: &UpdateComplianceBaselineRequest,
+    ) -> Result<Option<ComplianceBaseline>> {
+        let existing = self.get_by_id(id).await?;
+        if existing.is_none() {
+            return Ok(None);
+        }
+        let existing = existing.unwrap();
+
+        let name = req.name.as_deref().unwrap_or(&existing.name);
+        let description = match &req.description {
+            Some(d) => d.as_deref(),
+            None => existing.description.as_deref(),
+        };
+        let rules = req.rules.as_ref().unwrap_or(&existing.rules);
+        let severity = req.severity_level.unwrap_or(existing.severity_level);
+        let rules_json = serde_json::to_string(rules).unwrap_or_else(|_| "[]".to_string());
+
+        sqlx::query(
+            r#"
+            UPDATE compliance_baselines
+            SET name = ?, description = ?, rules = ?, severity_level = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(name)
+        .bind(description)
+        .bind(&rules_json)
+        .bind(severity.as_str())
+        .bind(id.to_string())
+        .execute(self.pool)
+        .await
+        .context("Failed to update compliance baseline")?;
+
+        self.get_by_id(id).await
     }
 
     /// Delete a baseline

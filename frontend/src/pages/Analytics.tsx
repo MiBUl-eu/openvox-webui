@@ -10,6 +10,10 @@ import {
   Play,
   Trash2,
   Calendar,
+  Pencil,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -31,6 +35,7 @@ import {
   useExecuteReport,
   useGenerateReportByType,
   useCreateComplianceBaseline,
+  useUpdateComplianceBaseline,
   useDeleteComplianceBaseline,
   useCreateDriftBaseline,
   useDeleteDriftBaseline,
@@ -87,6 +92,7 @@ export default function Analytics() {
   const [showNewReportModal, setShowNewReportModal] = useState(false);
   const [showNewComplianceModal, setShowNewComplianceModal] = useState(false);
   const [showNewDriftModal, setShowNewDriftModal] = useState(false);
+  const [editingComplianceBaseline, setEditingComplianceBaseline] = useState<ComplianceBaseline | null>(null);
   const [reportResult, setReportResult] = useState<ReportResult | null>(null);
   const [generatingReport, setGeneratingReport] = useState<string | null>(null);
 
@@ -148,6 +154,7 @@ export default function Analytics() {
   const executeReport = useExecuteReport();
   const generateReport = useGenerateReportByType();
   const createComplianceBaseline = useCreateComplianceBaseline();
+  const updateComplianceBaseline = useUpdateComplianceBaseline();
   const deleteComplianceBaseline = useDeleteComplianceBaseline();
   const createDriftBaseline = useCreateDriftBaseline();
   const deleteDriftBaseline = useDeleteDriftBaseline();
@@ -628,7 +635,7 @@ export default function Analytics() {
               <h3 className="text-lg font-semibold text-gray-900">Compliance Baselines</h3>
               <button
                 onClick={() => setShowNewComplianceModal(true)}
-                className="btn-primary flex items-center gap-2"
+                className="flex items-center gap-2 px-4 py-2 border-2 border-primary-600 text-primary-600 bg-white rounded-lg font-medium hover:bg-primary-600 hover:text-white transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 New Baseline
@@ -656,12 +663,22 @@ export default function Analytics() {
                           <p className="text-sm text-gray-500 mt-1">{baseline.description}</p>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleDeleteComplianceBaseline(baseline.id)}
-                        className="p-1 text-danger-600 hover:bg-danger-50 rounded"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setEditingComplianceBaseline(baseline)}
+                          className="p-1 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded"
+                          title="Edit baseline"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteComplianceBaseline(baseline.id)}
+                          className="p-1 text-gray-400 hover:text-danger-600 hover:bg-danger-50 rounded"
+                          title="Delete baseline"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                     <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
                       <span>{baseline.rules.length} rules</span>
@@ -764,6 +781,21 @@ export default function Analytics() {
           onCreate={async (data) => {
             await createComplianceBaseline.mutateAsync(data);
             setShowNewComplianceModal(false);
+          }}
+        />
+      )}
+
+      {/* Edit Compliance Baseline Modal */}
+      {editingComplianceBaseline && (
+        <EditComplianceBaselineModal
+          baseline={editingComplianceBaseline}
+          onClose={() => setEditingComplianceBaseline(null)}
+          onUpdate={async (data) => {
+            await updateComplianceBaseline.mutateAsync({
+              id: editingComplianceBaseline.id,
+              request: data,
+            });
+            setEditingComplianceBaseline(null);
           }}
         />
       )}
@@ -1013,6 +1045,41 @@ function NewReportModal({
   );
 }
 
+// Help content for compliance baselines
+function ComplianceBaselineHelp() {
+  const [showHelp, setShowHelp] = useState(false);
+
+  return (
+    <div className="mb-4">
+      <button
+        type="button"
+        onClick={() => setShowHelp(!showHelp)}
+        className="flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700 transition-colors"
+      >
+        <HelpCircle className="w-4 h-4" />
+        <span>How to create an effective baseline</span>
+        {showHelp ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+      {showHelp && (
+        <div className="mt-3 p-4 bg-primary-50 border border-primary-200 rounded-lg text-sm text-gray-700 space-y-2">
+          <p>
+            A <strong>compliance baseline</strong> defines a set of rules that check node facts against expected values to ensure your infrastructure meets your standards.
+          </p>
+          <p><strong>Naming tips:</strong> Use descriptive names that reflect the purpose, e.g. &quot;Production OS Standards&quot; or &quot;Security Hardening Checks&quot;.</p>
+          <p><strong>Severity levels:</strong></p>
+          <ul className="list-disc ml-5 space-y-1">
+            <li><strong>Low</strong> &mdash; Informational, minor deviations</li>
+            <li><strong>Medium</strong> &mdash; Should be addressed in normal workflow</li>
+            <li><strong>High</strong> &mdash; Important issues requiring prompt attention</li>
+            <li><strong>Critical</strong> &mdash; Urgent, must be fixed immediately</li>
+          </ul>
+          <p>After creating the baseline, you can edit it to add compliance rules that check specific facts against expected values.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // New Compliance Baseline Modal
 function NewComplianceBaselineModal({
   onClose,
@@ -1043,9 +1110,104 @@ function NewComplianceBaselineModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">New Compliance Baseline</h3>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="px-6 py-4 space-y-4">
+            <ComplianceBaselineHelp />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                placeholder="e.g. Production OS Standards"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                placeholder="Describe what this baseline checks and why"
+                rows={3}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Severity Level</label>
+              <select
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value as 'low' | 'medium' | 'high' | 'critical')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+          </div>
+          <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || !name}
+              className="btn-primary"
+            >
+              {isSubmitting ? 'Creating...' : 'Create Baseline'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Edit Compliance Baseline Modal
+function EditComplianceBaselineModal({
+  baseline,
+  onClose,
+  onUpdate,
+}: {
+  baseline: ComplianceBaseline;
+  onClose: () => void;
+  onUpdate: (data: { name?: string; description?: string | null; rules?: Array<{ id: string; name: string; description?: string; fact_name: string; operator: string; expected_value: unknown; severity: 'low' | 'medium' | 'high' | 'critical' }>; severity_level?: 'low' | 'medium' | 'high' | 'critical' }) => Promise<void>;
+}) {
+  const [name, setName] = useState(baseline.name);
+  const [description, setDescription] = useState(baseline.description || '');
+  const [severity, setSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>(baseline.severity_level);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      await onUpdate({
+        name,
+        description: description || null,
+        severity_level: severity,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">Edit Compliance Baseline</h3>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="px-6 py-4 space-y-4">
@@ -1081,6 +1243,9 @@ function NewComplianceBaselineModal({
                 <option value="critical">Critical</option>
               </select>
             </div>
+            <div className="text-xs text-gray-400">
+              {baseline.rules.length} rule{baseline.rules.length !== 1 ? 's' : ''} configured &middot; Created {new Date(baseline.created_at).toLocaleDateString()}
+            </div>
           </div>
           <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
             <button
@@ -1095,7 +1260,7 @@ function NewComplianceBaselineModal({
               disabled={isSubmitting || !name}
               className="btn-primary"
             >
-              {isSubmitting ? 'Creating...' : 'Create Baseline'}
+              {isSubmitting ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </form>

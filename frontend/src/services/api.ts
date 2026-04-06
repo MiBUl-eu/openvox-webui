@@ -58,6 +58,7 @@ import type {
   ReportTemplate,
   ComplianceBaseline,
   CreateComplianceBaselineRequest,
+  UpdateComplianceBaselineRequest,
   DriftBaseline,
   CreateDriftBaselineRequest,
   GenerateReportRequest,
@@ -791,6 +792,11 @@ export const api = {
 
   createComplianceBaseline: async (request: CreateComplianceBaselineRequest): Promise<ComplianceBaseline> => {
     const response = await client.post('/analytics/compliance-baselines', request);
+    return response.data;
+  },
+
+  updateComplianceBaseline: async (id: string, request: UpdateComplianceBaselineRequest): Promise<ComplianceBaseline> => {
+    const response = await client.put(`/analytics/compliance-baselines/${id}`, request);
     return response.data;
   },
 

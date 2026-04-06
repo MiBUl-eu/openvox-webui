@@ -383,6 +383,15 @@ pub struct CreateComplianceBaselineRequest {
     pub severity_level: SeverityLevel,
 }
 
+/// Request to update a compliance baseline
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateComplianceBaselineRequest {
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub rules: Option<Vec<ComplianceRule>>,
+    pub severity_level: Option<SeverityLevel>,
+}
+
 /// Request to create a drift baseline
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDriftBaselineRequest {
