@@ -17,7 +17,8 @@ use crate::models::{
     ComplianceBaseline, CreateComplianceBaselineRequest, CreateDriftBaselineRequest,
     CreateSavedReportRequest, CreateScheduleRequest, DriftBaseline, ExecuteReportRequest,
     OutputFormat, ReportExecution, ReportQueryConfig, ReportResult, ReportSchedule, ReportTemplate,
-    ReportType, SavedReport, UpdateSavedReportRequest, UpdateScheduleRequest,
+    ReportType, SavedReport, UpdateComplianceBaselineRequest, UpdateSavedReportRequest,
+    UpdateScheduleRequest,
 };
 use crate::services::ReportingService;
 use crate::utils::error::{AppError, AppResult};
@@ -63,7 +64,9 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/compliance-baselines/{id}",
-            get(get_compliance_baseline).delete(delete_compliance_baseline),
+            get(get_compliance_baseline)
+                .put(update_compliance_baseline)
+                .delete(delete_compliance_baseline),
         )
         // Drift Baselines
         .route(
@@ -382,6 +385,20 @@ async fn create_compliance_baseline(
 ) -> AppResult<Json<ComplianceBaseline>> {
     let repo = ComplianceBaselineRepository::new(&state.db);
     let baseline = repo.create(&req, auth_user.user_id()).await?;
+    Ok(Json(baseline))
+}
+
+/// Update a compliance baseline
+async fn update_compliance_baseline(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateComplianceBaselineRequest>,
+) -> AppResult<Json<ComplianceBaseline>> {
+    let repo = ComplianceBaselineRepository::new(&state.db);
+    let baseline = repo
+        .update(id, &req)
+        .await?
+        .ok_or_else(|| AppError::not_found("Compliance baseline not found"))?;
     Ok(Json(baseline))
 }
 

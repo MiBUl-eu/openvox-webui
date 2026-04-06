@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Add edit functionality for compliance baselines (PUT endpoint + edit modal)
+- Add help guide to the new compliance baseline modal with tips on naming, severity levels, and rules
+- Add placeholder text in compliance baseline form fields for better UX
+
+### Changed
+- Restyle "New Baseline" button on Compliance tab to an outlined style for a more polished look
+- Update baseline card action buttons to show edit (pencil) and delete icons side by side
+
+### Added
 - Add repository-based package version checking: nodes report their configured repository metadata (YUM/APT/Zypper/Winget), server periodically fetches latest package versions directly from repositories
 - Add `fleet_repository_configs` and `node_repository_configs` database tables for storing repository metadata
 - Add `RepoCheckerService` with YUM (repodata/primary.xml) and APT (Packages.gz) metadata parsing

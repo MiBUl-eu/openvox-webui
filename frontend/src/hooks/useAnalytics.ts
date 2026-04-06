@@ -7,6 +7,7 @@ import type {
   CreateScheduleRequest,
   UpdateScheduleRequest,
   CreateComplianceBaselineRequest,
+  UpdateComplianceBaselineRequest,
   CreateDriftBaselineRequest,
   GenerateReportRequest,
   ReportType,
@@ -203,6 +204,18 @@ export function useCreateComplianceBaseline() {
 
   return useMutation({
     mutationFn: (request: CreateComplianceBaselineRequest) => api.createComplianceBaseline(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: analyticsKeys.complianceBaselines() });
+    },
+  });
+}
+
+export function useUpdateComplianceBaseline() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, request }: { id: string; request: UpdateComplianceBaselineRequest }) =>
+      api.updateComplianceBaseline(id, request),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: analyticsKeys.complianceBaselines() });
     },

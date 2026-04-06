@@ -1207,6 +1207,13 @@ export interface CreateComplianceBaselineRequest {
   severity_level?: SeverityLevel;
 }
 
+export interface UpdateComplianceBaselineRequest {
+  name?: string;
+  description?: string | null;
+  rules?: ComplianceRule[];
+  severity_level?: SeverityLevel;
+}
+
 export interface DriftToleranceConfig {
   ignored_facts?: string[];
   numeric_tolerance_percent?: number;
