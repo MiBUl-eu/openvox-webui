@@ -184,7 +184,7 @@ export default function UpdatesTab() {
                     />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number, name: string) => [String(value), name]} />
+                <Tooltip formatter={(value, name) => [String(value), String(name)]} />
                 <Legend
                   formatter={(value: string) => {
                     const entry = complianceData.find((d) => d.label === value);
