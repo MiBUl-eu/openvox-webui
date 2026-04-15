@@ -4,15 +4,19 @@
 
 use axum::{
     extract::State,
+    http::HeaderMap,
     http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
+use chrono::{Duration, Utc};
 use serde::Serialize;
+use uuid::Uuid;
 
 use crate::{
     middleware::auth::{
-        create_access_token, create_refresh_token, validate_token, AuthUser, TokenType,
+        create_access_token, create_auth_session, create_refresh_token, ensure_auth_session_active,
+        revoke_auth_session, validate_token, AuthError, AuthUser, TokenType,
     },
     models::{AuthResponse, LoginRequest, RefreshTokenRequest, TokenResponse, UserPublic},
     services::AuthService,
@@ -88,10 +92,25 @@ async fn login(
         .await
         .unwrap_or_else(|_| vec![user.role.clone()]);
 
+    let session_id = Uuid::new_v4();
+    let session_expires_at = Utc::now() + Duration::days(state.config.auth.refresh_token_expiry_days as i64);
+    create_auth_session(&state.db, &session_id, &user.id, session_expires_at).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "internal_error".to_string(),
+                message: format!("Failed to create session: {}", auth_error_message(&e)),
+                details: None,
+                code: None,
+            }),
+        )
+    })?;
+
     // Create tokens
     let access_token = create_access_token(
         &user.id,
         &user.organization_id,
+        &session_id,
         &user.username,
         &user.email,
         roles,
@@ -112,6 +131,7 @@ async fn login(
 
     let refresh_token = create_refresh_token(
         &user.id,
+        &session_id,
         &user.username,
         &user.email,
         &state.config.auth.jwt_secret,
@@ -172,6 +192,10 @@ async fn refresh_token(
         ));
     }
 
+    ensure_auth_session_active(&state.db, &token_data.claims.jti, true)
+        .await
+        .map_err(auth_error_response)?;
+
     // Get user from database to ensure they still exist and get current roles
     let auth_service = AuthService::new(state.db.clone());
     let user_id = uuid::Uuid::parse_str(&token_data.claims.sub).map_err(|_| {
@@ -218,10 +242,14 @@ async fn refresh_token(
         .await
         .unwrap_or_else(|_| vec![user.role.clone()]);
 
+    let session_id = Uuid::parse_str(&token_data.claims.jti)
+        .map_err(|_| auth_error_response(AuthError::InvalidToken))?;
+
     // Create new access token
     let access_token = create_access_token(
         &user.id,
         &user.organization_id,
+        &session_id,
         &user.username,
         &user.email,
         roles,
@@ -257,13 +285,46 @@ struct LogoutResponse {
 ///
 /// POST /api/v1/auth/logout
 ///
-/// Note: Since we use stateless JWT tokens, logout is handled client-side
-/// by discarding the tokens. This endpoint is provided for consistency
-/// and could be extended to support token blacklisting in the future.
-async fn logout() -> Json<LogoutResponse> {
+/// Revokes the current auth session when a bearer token is supplied.
+async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Json<LogoutResponse> {
+    if let Some(auth_header) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer ")))
+    {
+        if let Ok(token_data) = validate_token(auth_header, &state.config.auth.jwt_secret) {
+            let _ = revoke_auth_session(&state.db, &token_data.claims.jti).await;
+        }
+    }
+
     Json(LogoutResponse {
         message: "Successfully logged out".to_string(),
     })
+}
+
+fn auth_error_message(error: &AuthError) -> &'static str {
+    match error {
+        AuthError::MissingToken => "Missing authentication token",
+        AuthError::InvalidToken => "Invalid authentication token",
+        AuthError::TokenExpired => "Authentication token has expired",
+        AuthError::SessionExpired => "Session expired due to inactivity",
+        AuthError::InvalidTokenType => "Invalid token type",
+    }
+}
+
+fn auth_error_response(error: AuthError) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            error: "unauthorized".to_string(),
+            message: auth_error_message(&error).to_string(),
+            details: None,
+            code: None,
+        }),
+    )
 }
 
 /// Register a new user

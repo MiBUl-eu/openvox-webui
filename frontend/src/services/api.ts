@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '../stores/authStore';
 import type {
   Node,
   NodeGroup,
@@ -61,6 +62,7 @@ import type {
   UpdateComplianceBaselineRequest,
   DriftBaseline,
   CreateDriftBaselineRequest,
+  UpdateDriftBaselineRequest,
   GenerateReportRequest,
   ReportType,
   ReportQueryConfig,
@@ -164,6 +166,32 @@ client.interceptors.request.use((config) => {
   }
   return config;
 });
+
+client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error.response?.status;
+
+    if (status === 401 && useAuthStore.getState().isAuthenticated) {
+      const serverMessage =
+        typeof error.response?.data?.message === 'string'
+          ? error.response.data.message
+          : '';
+
+      const reason = serverMessage === 'Session expired due to inactivity'
+        ? 'Your session expired after 30 minutes of inactivity.'
+        : 'Your session has expired. Please sign in again.';
+
+      useAuthStore.getState().logout(reason);
+
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.replace('/login');
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 // Auth response types
 interface LoginResponse {
@@ -829,6 +857,11 @@ export const api = {
 
   createDriftBaseline: async (request: CreateDriftBaselineRequest): Promise<DriftBaseline> => {
     const response = await client.post('/analytics/drift-baselines', request);
+    return response.data;
+  },
+
+  updateDriftBaseline: async (id: string, request: UpdateDriftBaselineRequest): Promise<DriftBaseline> => {
+    const response = await client.put(`/analytics/drift-baselines/${id}`, request);
     return response.data;
   },
 

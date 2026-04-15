@@ -3,7 +3,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Eye, EyeOff, Lock, User, AlertCircle, Shield } from 'lucide-react';
 import { api } from '../services/api';
-import { useAuthStore } from '../stores/authStore';
+import { consumeSessionLogoutReason, useAuthStore } from '../stores/authStore';
 import { usePermissionsStore } from '../stores/permissionsStore';
 
 export default function Login() {
@@ -19,6 +19,13 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
+
+  useEffect(() => {
+    const logoutReason = consumeSessionLogoutReason();
+    if (logoutReason) {
+      setError(logoutReason);
+    }
+  }, []);
 
   // Query server info to check SAML status
   const { data: serverInfo, isLoading: serverInfoLoading, error: serverInfoError } = useQuery({
@@ -110,11 +117,6 @@ export default function Login() {
       const refreshToken = searchParams.get('refresh_token');
       const redirect = searchParams.get('redirect') || '/';
 
-      // Store tokens
-      if (refreshToken) {
-        localStorage.setItem('refresh_token', refreshToken);
-      }
-
       // Decode the JWT to get user info
       try {
         const payload = JSON.parse(atob(accessToken.split('.')[1]));
@@ -125,7 +127,8 @@ export default function Login() {
             email: payload.email,
             role: payload.roles?.[0] || 'viewer',
           },
-          accessToken
+          accessToken,
+          refreshToken || undefined
         );
         fetchPermissions(payload.sub);
         navigate(redirect, { replace: true });
@@ -146,7 +149,8 @@ export default function Login() {
           email: data.user.email,
           role: data.user.role as 'admin' | 'user' | 'viewer',
         },
-        data.access_token
+        data.access_token,
+        data.refresh_token
       );
       // Fetch user permissions after successful login
       await fetchPermissions(data.user.id);

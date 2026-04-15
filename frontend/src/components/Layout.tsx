@@ -23,6 +23,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { api } from '../services/api';
 import { useAuthStore } from '../stores/authStore';
 import NotificationBell from './NotificationBell';
 import NotificationManager from './NotificationManager';
@@ -73,7 +74,12 @@ export default function Layout({ children }: LayoutProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+    } catch {
+      // Ignore logout API failures; local logout still clears client state.
+    }
     logout();
     navigate('/login');
   };

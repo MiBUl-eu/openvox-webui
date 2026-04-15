@@ -18,10 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add cancel button to Update Jobs UI for jobs in `pending_approval`, `approved`, or `in_progress` states
 - Add `POST /api/v1/inventory/updates/{job_id}/cancel` endpoint to cancel update jobs
+- Add inline compliance rule editor to create and edit compliance baselines, including add/remove rule controls and fact/operator/value configuration
+- Add server-backed auth session tracking so idle timeout enforcement survives page refreshes and token reuse
+- Add optional node group selection to drift detection baselines in create and edit modals
 
 ### Fixed
-- Fix report metrics over time chart by fetching 30-day report data window (`since`) with higher limit and using linear interpolation to avoid misleading smoothing
+- Fix report metrics over time chart by fetching a 30-day report data window (`since`) with a higher 10000-report limit and using linear interpolation to avoid misleading smoothing
 - Fix hung/stale update jobs: dispatched targets that receive no agent response within 2 hours are automatically marked as failed and the parent job status is rolled up accordingly
+- Fix compliance baseline modal action buttons to use the shared design-system button styles
+- Fix missing idle session expiration by automatically logging users out after 30 minutes of inactivity in both the GUI and protected API session validation
+- Fix drift baseline cards to show the selected group name instead of the raw group ID
+- Fix drift baseline cards to show an explicit "All nodes" scope when no node group is selected
 
 ### Added
 - Add edit functionality for compliance baselines (PUT endpoint + edit modal)

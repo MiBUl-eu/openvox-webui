@@ -1849,6 +1849,65 @@ impl<'a> DriftBaselineRepository<'a> {
             .ok_or_else(|| anyhow::anyhow!("Failed to retrieve created baseline"))
     }
 
+    /// Update a baseline
+    pub async fn update(
+        &self,
+        id: Uuid,
+        req: &crate::models::UpdateDriftBaselineRequest,
+    ) -> Result<Option<DriftBaseline>> {
+        let existing = self.get_by_id(id).await?;
+        if existing.is_none() {
+            return Ok(None);
+        }
+        let existing = existing.unwrap();
+
+        let name = req.name.as_deref().unwrap_or(&existing.name);
+        let description = match &req.description {
+            Some(Some(d)) => Some(d.as_str()),
+            Some(None) => None,
+            None => existing.description.as_deref(),
+        };
+        let node_group_id = match &req.node_group_id {
+            Some(Some(g)) => Some(g.to_string()),
+            Some(None) => None,
+            None => existing.node_group_id.map(|v| v.to_string()),
+        };
+        let baseline_facts = req
+            .baseline_facts
+            .as_ref()
+            .unwrap_or(&existing.baseline_facts);
+        let tolerance_config = match &req.tolerance_config {
+            Some(Some(c)) => Some(c.clone()),
+            Some(None) => None,
+            None => existing.tolerance_config.clone(),
+        };
+
+        let baseline_facts_json =
+            serde_json::to_string(&baseline_facts).unwrap_or_else(|_| "{}".to_string());
+        let tolerance_config_json = tolerance_config
+            .as_ref()
+            .map(|c| serde_json::to_string(c).unwrap_or_else(|_| "{}".to_string()));
+
+        sqlx::query(
+            r#"
+            UPDATE drift_baselines
+            SET name = ?, description = ?, node_group_id = ?, baseline_facts = ?, tolerance_config = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(name)
+        .bind(description)
+        .bind(&node_group_id)
+        .bind(&baseline_facts_json)
+        .bind(&tolerance_config_json)
+        .bind(id.to_string())
+        .execute(self.pool)
+        .await
+        .context("Failed to update drift baseline")?;
+
+        self.get_by_id(id).await
+    }
+
     /// Delete a baseline
     pub async fn delete(&self, id: Uuid) -> Result<bool> {
         let result = sqlx::query("DELETE FROM drift_baselines WHERE id = ?")

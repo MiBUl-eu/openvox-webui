@@ -402,6 +402,16 @@ pub struct CreateDriftBaselineRequest {
     pub tolerance_config: Option<DriftToleranceConfig>,
 }
 
+/// Request to update a drift baseline
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateDriftBaselineRequest {
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub node_group_id: Option<Option<Uuid>>,
+    pub baseline_facts: Option<serde_json::Value>,
+    pub tolerance_config: Option<Option<DriftToleranceConfig>>,
+}
+
 // ==================== Report Results ====================
 
 /// Node health report result

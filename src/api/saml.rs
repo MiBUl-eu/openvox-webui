@@ -9,10 +9,12 @@ use axum::{
     routing::{get, post},
     Form, Router,
 };
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{
-    middleware::auth::{create_access_token, create_refresh_token},
+    middleware::auth::{create_access_token, create_auth_session, create_refresh_token},
     services::{AuthService, SamlService},
     utils::error::ErrorResponse,
     AppState,
@@ -535,11 +537,29 @@ async fn saml_acs(State(state): State<AppState>, Form(form): Form<SamlAcsForm>) 
         });
     tracing::debug!("User roles: {:?}", roles);
 
+    let session_id = Uuid::new_v4();
+    let session_expires_at = Utc::now()
+        + Duration::days(state.config.auth.refresh_token_expiry_days as i64);
+    if let Err(e) = create_auth_session(&state.db, &session_id, &user.id, session_expires_at).await {
+        tracing::error!("Failed to create SAML auth session: {:?}", e);
+        let error = SamlErrorPage {
+            error: "Internal Error".to_string(),
+            message: "Failed to create session".to_string(),
+        };
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "text/html")],
+            error.to_html(),
+        )
+            .into_response();
+    }
+
     // Create JWT tokens
     tracing::debug!("Creating JWT access token...");
     let access_token = match create_access_token(
         &user.id,
         &user.organization_id,
+        &session_id,
         &user.username,
         &user.email,
         roles,
@@ -568,6 +588,7 @@ async fn saml_acs(State(state): State<AppState>, Form(form): Form<SamlAcsForm>) 
     tracing::debug!("Creating JWT refresh token...");
     let refresh_token = match create_refresh_token(
         &user.id,
+        &session_id,
         &user.username,
         &user.email,
         &state.config.auth.jwt_secret,

@@ -324,6 +324,7 @@ mod tests {
             organization_id: Uuid::new_v4(),
             username: "admin".to_string(),
             email: "admin@example.com".to_string(),
+            session_id: Uuid::new_v4().to_string(),
             roles: vec!["admin".to_string()],
             role_ids: vec![SystemRole::Admin.uuid()],
         };
@@ -348,6 +349,7 @@ mod tests {
             organization_id: Uuid::new_v4(),
             username: "viewer".to_string(),
             email: "viewer@example.com".to_string(),
+            session_id: Uuid::new_v4().to_string(),
             roles: vec!["viewer".to_string()],
             role_ids: vec![SystemRole::Viewer.uuid()],
         };
@@ -373,6 +375,7 @@ mod tests {
             organization_id: Uuid::new_v4(),
             username: "operator".to_string(),
             email: "operator@example.com".to_string(),
+            session_id: Uuid::new_v4().to_string(),
             roles: vec!["operator".to_string()],
             role_ids: vec![SystemRole::Operator.uuid()],
         };
@@ -408,6 +411,7 @@ mod tests {
             organization_id: Uuid::new_v4(),
             username: "superadmin".to_string(),
             email: "superadmin@example.com".to_string(),
+            session_id: Uuid::new_v4().to_string(),
             roles: vec!["super_admin".to_string()],
             role_ids: vec![SystemRole::SuperAdmin.uuid()],
         };
@@ -436,6 +440,7 @@ mod tests {
             organization_id: Uuid::new_v4(),
             username: "superadmin".to_string(),
             email: "superadmin@example.com".to_string(),
+            session_id: Uuid::new_v4().to_string(),
             roles: vec!["super_admin".to_string()],
             role_ids: vec![SystemRole::SuperAdmin.uuid()],
         };

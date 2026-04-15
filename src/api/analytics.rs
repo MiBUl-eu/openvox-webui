@@ -17,8 +17,8 @@ use crate::models::{
     ComplianceBaseline, CreateComplianceBaselineRequest, CreateDriftBaselineRequest,
     CreateSavedReportRequest, CreateScheduleRequest, DriftBaseline, ExecuteReportRequest,
     OutputFormat, ReportExecution, ReportQueryConfig, ReportResult, ReportSchedule, ReportTemplate,
-    ReportType, SavedReport, UpdateComplianceBaselineRequest, UpdateSavedReportRequest,
-    UpdateScheduleRequest,
+    ReportType, SavedReport, UpdateComplianceBaselineRequest, UpdateDriftBaselineRequest,
+    UpdateSavedReportRequest, UpdateScheduleRequest,
 };
 use crate::services::ReportingService;
 use crate::utils::error::{AppError, AppResult};
@@ -75,7 +75,9 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/drift-baselines/{id}",
-            get(get_drift_baseline).delete(delete_drift_baseline),
+            get(get_drift_baseline)
+                .put(update_drift_baseline)
+                .delete(delete_drift_baseline),
         )
         // Export
         .route("/executions/{id}/export", get(export_execution))
@@ -452,6 +454,20 @@ async fn create_drift_baseline(
 ) -> AppResult<Json<DriftBaseline>> {
     let repo = DriftBaselineRepository::new(&state.db);
     let baseline = repo.create(&req, auth_user.user_id()).await?;
+    Ok(Json(baseline))
+}
+
+/// Update a drift baseline
+async fn update_drift_baseline(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateDriftBaselineRequest>,
+) -> AppResult<Json<DriftBaseline>> {
+    let repo = DriftBaselineRepository::new(&state.db);
+    let baseline = repo
+        .update(id, &req)
+        .await?
+        .ok_or_else(|| AppError::not_found("Drift baseline not found"))?;
     Ok(Json(baseline))
 }
 

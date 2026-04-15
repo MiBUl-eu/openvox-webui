@@ -12,12 +12,14 @@ use axum::{
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::{
     models::default_organization_uuid, services::AuthService, utils::error::ErrorResponse, AppState,
 };
+
+const SESSION_IDLE_TIMEOUT_MINUTES: i64 = 30;
 
 /// JWT Claims structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +69,7 @@ pub struct AuthUser {
     pub organization_id: Uuid,
     pub username: String,
     pub email: String,
+    pub session_id: String,
     /// Role names (from JWT)
     pub roles: Vec<String>,
     /// Role UUIDs (resolved from database)
@@ -87,6 +90,7 @@ impl TryFrom<Claims> for AuthUser {
             organization_id,
             username: claims.username,
             email: claims.email,
+            session_id: claims.jti,
             roles: claims.roles,
             role_ids: vec![], // Will be populated by middleware
         })
@@ -140,6 +144,7 @@ where
 pub fn create_access_token(
     user_id: &Uuid,
     organization_id: &Uuid,
+    session_id: &Uuid,
     username: &str,
     email: &str,
     roles: Vec<String>,
@@ -156,7 +161,7 @@ pub fn create_access_token(
         iat: now.timestamp(),
         exp: exp.timestamp(),
         nbf: now.timestamp(),
-        jti: Uuid::new_v4().to_string(),
+        jti: session_id.to_string(),
         token_type: TokenType::Access,
         roles,
         organization_id: Some(organization_id.to_string()),
@@ -172,6 +177,7 @@ pub fn create_access_token(
 /// Create a new JWT refresh token
 pub fn create_refresh_token(
     user_id: &Uuid,
+    session_id: &Uuid,
     username: &str,
     email: &str,
     secret: &str,
@@ -187,7 +193,7 @@ pub fn create_refresh_token(
         iat: now.timestamp(),
         exp: exp.timestamp(),
         nbf: now.timestamp(),
-        jti: Uuid::new_v4().to_string(),
+        jti: session_id.to_string(),
         token_type: TokenType::Refresh,
         roles: vec![],
         organization_id: None,
@@ -224,6 +230,7 @@ pub enum AuthError {
     MissingToken,
     InvalidToken,
     TokenExpired,
+    SessionExpired,
     InvalidTokenType,
 }
 
@@ -234,6 +241,9 @@ impl IntoResponse for AuthError {
             AuthError::InvalidToken => (StatusCode::UNAUTHORIZED, "Invalid authentication token"),
             AuthError::TokenExpired => {
                 (StatusCode::UNAUTHORIZED, "Authentication token has expired")
+            }
+            AuthError::SessionExpired => {
+                (StatusCode::UNAUTHORIZED, "Session expired due to inactivity")
             }
             AuthError::InvalidTokenType => (StatusCode::UNAUTHORIZED, "Invalid token type"),
         };
@@ -282,6 +292,91 @@ fn parse_db_timestamp(ts: &str) -> Option<chrono::DateTime<Utc>> {
         return Some(chrono::DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
     }
     None
+}
+
+pub async fn create_auth_session(
+    pool: &SqlitePool,
+    session_id: &Uuid,
+    user_id: &Uuid,
+    expires_at: chrono::DateTime<Utc>,
+) -> Result<(), AuthError> {
+    let now = Utc::now().to_rfc3339();
+
+    sqlx::query(
+        r#"
+        INSERT INTO auth_sessions (id, user_id, last_activity_at, expires_at, revoked_at, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, NULL, ?3, ?3)
+        "#,
+    )
+    .bind(session_id.to_string())
+    .bind(user_id.to_string())
+    .bind(&now)
+    .bind(expires_at.to_rfc3339())
+    .execute(pool)
+    .await
+    .map_err(|_| AuthError::InvalidToken)?;
+
+    Ok(())
+}
+
+pub async fn revoke_auth_session(pool: &SqlitePool, session_id: &str) -> Result<(), AuthError> {
+    let now = Utc::now().to_rfc3339();
+
+    sqlx::query(
+        "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?1), updated_at = ?1 WHERE id = ?2",
+    )
+    .bind(&now)
+    .bind(session_id)
+    .execute(pool)
+    .await
+    .map_err(|_| AuthError::InvalidToken)?;
+
+    Ok(())
+}
+
+pub async fn ensure_auth_session_active(
+    pool: &SqlitePool,
+    session_id: &str,
+    touch: bool,
+) -> Result<(), AuthError> {
+    let row = sqlx::query(
+        "SELECT last_activity_at, expires_at, revoked_at FROM auth_sessions WHERE id = ?1",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| AuthError::InvalidToken)?
+    .ok_or(AuthError::InvalidToken)?;
+
+    let revoked_at: Option<String> = row.try_get("revoked_at").map_err(|_| AuthError::InvalidToken)?;
+    if revoked_at.is_some() {
+        return Err(AuthError::SessionExpired);
+    }
+
+    let last_activity_at: String = row.try_get("last_activity_at").map_err(|_| AuthError::InvalidToken)?;
+    let expires_at: String = row.try_get("expires_at").map_err(|_| AuthError::InvalidToken)?;
+    let last_activity = parse_db_timestamp(&last_activity_at).ok_or(AuthError::InvalidToken)?;
+    let absolute_expiry = parse_db_timestamp(&expires_at).ok_or(AuthError::InvalidToken)?;
+    let now = Utc::now();
+
+    if now >= absolute_expiry || now >= last_activity + Duration::minutes(SESSION_IDLE_TIMEOUT_MINUTES) {
+        let _ = revoke_auth_session(pool, session_id).await;
+        return Err(AuthError::SessionExpired);
+    }
+
+    if touch {
+        let now_str = now.to_rfc3339();
+        sqlx::query(
+            "UPDATE auth_sessions SET last_activity_at = ?1, updated_at = ?1 WHERE id = ?2",
+        )
+        .bind(&now_str)
+        .bind(session_id)
+        .execute(pool)
+        .await
+        .map_err(|_| AuthError::InvalidToken)?;
+    }
+
+    Ok(())
 }
 
 async fn authenticate_api_key(state: &AppState, token: &str) -> Result<AuthUser, AuthError> {
@@ -361,6 +456,7 @@ async fn authenticate_api_key(state: &AppState, token: &str) -> Result<AuthUser,
         organization_id: Uuid::parse_str(&org_id_str).map_err(|_| AuthError::InvalidToken)?,
         username: row.get("username"),
         email: row.get("email"),
+        session_id: String::new(),
         roles,
         role_ids,
     })
@@ -403,6 +499,7 @@ pub async fn auth_middleware(
             if token_data.claims.token_type != TokenType::Access {
                 return Err(AuthError::InvalidTokenType);
             }
+            ensure_auth_session_active(&state.db, &token_data.claims.jti, true).await?;
             let mut user: AuthUser = token_data
                 .claims
                 .try_into()
@@ -433,6 +530,7 @@ pub async fn auth_middleware(
         if token_data.claims.token_type != TokenType::Access {
             return Err(AuthError::InvalidTokenType);
         }
+        ensure_auth_session_active(&state.db, &token_data.claims.jti, true).await?;
         let mut user: AuthUser = token_data
             .claims
             .try_into()
@@ -474,14 +572,21 @@ pub async fn optional_auth_middleware(
         if let Some(token) = extract_bearer_token(auth_header) {
             if let Ok(token_data) = validate_token(token, &state.config.auth.jwt_secret) {
                 if token_data.claims.token_type == TokenType::Access {
-                    if let Ok(mut auth_user) = AuthUser::try_from(token_data.claims) {
-                        let role_ids: Vec<Uuid> = auth_user
-                            .roles
-                            .iter()
-                            .filter_map(|name| state.rbac.get_role_by_name(name).map(|r| r.id))
-                            .collect();
-                        auth_user.role_ids = role_ids;
-                        Some(auth_user)
+                    if ensure_auth_session_active(&state.db, &token_data.claims.jti, true)
+                        .await
+                        .is_ok()
+                    {
+                        if let Ok(mut auth_user) = AuthUser::try_from(token_data.claims) {
+                            let role_ids: Vec<Uuid> = auth_user
+                                .roles
+                                .iter()
+                                .filter_map(|name| state.rbac.get_role_by_name(name).map(|r| r.id))
+                                .collect();
+                            auth_user.role_ids = role_ids;
+                            Some(auth_user)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
@@ -525,9 +630,11 @@ mod tests {
     fn test_create_and_validate_access_token() {
         let user_id = Uuid::new_v4();
         let org_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
         let token = create_access_token(
             &user_id,
             &org_id,
+            &session_id,
             "testuser",
             "test@example.com",
             vec!["admin".to_string()],
@@ -545,8 +652,16 @@ mod tests {
     #[test]
     fn test_create_and_validate_refresh_token() {
         let user_id = Uuid::new_v4();
-        let token =
-            create_refresh_token(&user_id, "testuser", "test@example.com", TEST_SECRET, 7).unwrap();
+        let session_id = Uuid::new_v4();
+        let token = create_refresh_token(
+            &user_id,
+            &session_id,
+            "testuser",
+            "test@example.com",
+            TEST_SECRET,
+            7,
+        )
+        .unwrap();
 
         let validated = validate_token(&token, TEST_SECRET).unwrap();
         assert_eq!(validated.claims.token_type, TokenType::Refresh);
@@ -562,9 +677,11 @@ mod tests {
     fn test_wrong_secret() {
         let user_id = Uuid::new_v4();
         let org_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
         let token = create_access_token(
             &user_id,
             &org_id,
+            &session_id,
             "testuser",
             "test@example.com",
             vec![],
@@ -618,6 +735,7 @@ mod tests {
             organization_id: Uuid::new_v4(),
             username: "testuser".to_string(),
             email: "test@example.com".to_string(),
+            session_id: Uuid::new_v4().to_string(),
             roles: vec!["admin".to_string()],
             role_ids: vec![],
         };

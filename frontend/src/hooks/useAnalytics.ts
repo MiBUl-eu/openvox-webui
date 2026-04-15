@@ -9,6 +9,7 @@ import type {
   CreateComplianceBaselineRequest,
   UpdateComplianceBaselineRequest,
   CreateDriftBaselineRequest,
+  UpdateDriftBaselineRequest,
   GenerateReportRequest,
   ReportType,
   ReportQueryConfig,
@@ -256,6 +257,19 @@ export function useCreateDriftBaseline() {
     mutationFn: (request: CreateDriftBaselineRequest) => api.createDriftBaseline(request),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: analyticsKeys.driftBaselines() });
+    },
+  });
+}
+
+export function useUpdateDriftBaseline() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, request }: { id: string; request: UpdateDriftBaselineRequest }) =>
+      api.updateDriftBaseline(id, request),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: analyticsKeys.driftBaselines() });
+      queryClient.invalidateQueries({ queryKey: analyticsKeys.driftBaseline(variables.id) });
     },
   });
 }

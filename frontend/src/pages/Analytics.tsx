@@ -38,6 +38,7 @@ import {
   useUpdateComplianceBaseline,
   useDeleteComplianceBaseline,
   useCreateDriftBaseline,
+  useUpdateDriftBaseline,
   useDeleteDriftBaseline,
 } from '../hooks/useAnalytics';
 import type {
@@ -45,12 +46,15 @@ import type {
   SavedReport,
   ReportTemplate,
   ComplianceBaseline,
+  ComplianceRule,
   DriftBaseline,
+  NodeGroup,
   ReportResult,
   NodeHealthReport,
   ComplianceReport,
   ChangeTrackingReport,
   DriftReport,
+  SeverityLevel,
 } from '../types';
 
 type TabId = 'overview' | 'heatmap' | 'groups' | 'facts' | 'topology' | 'reports' | 'compliance' | 'drift' | 'updates';
@@ -86,6 +90,146 @@ function formatDate(dateString: string | null | undefined): string {
   return new Date(dateString).toLocaleString();
 }
 
+type ComplianceRuleDraft = {
+  id: string;
+  name: string;
+  description: string;
+  fact_name: string;
+  operator: string;
+  expected_value: string;
+  severity: SeverityLevel;
+};
+
+type DriftFactDraft = {
+  id: string;
+  fact_name: string;
+  expected_value: string;
+};
+
+function createRuleId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `rule-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createEmptyDriftFactDraft(): DriftFactDraft {
+  return {
+    id: createRuleId(),
+    fact_name: '',
+    expected_value: '',
+  };
+}
+
+function toDriftFactDrafts(baselineFacts: Record<string, unknown>): DriftFactDraft[] {
+  const entries = Object.entries(baselineFacts);
+  if (entries.length === 0) {
+    return [createEmptyDriftFactDraft()];
+  }
+
+  return entries.map(([factName, expectedValue]) => ({
+    id: createRuleId(),
+    fact_name: factName,
+    expected_value:
+      typeof expectedValue === 'string'
+        ? expectedValue
+        : JSON.stringify(expectedValue),
+  }));
+}
+
+function toDriftBaselineFacts(drafts: DriftFactDraft[]): Record<string, unknown> {
+  return drafts.reduce<Record<string, unknown>>((acc, draft) => {
+    const factName = draft.fact_name.trim();
+    const expectedValue = draft.expected_value.trim();
+    if (!factName || !expectedValue) {
+      return acc;
+    }
+
+    acc[factName] = parseComplianceRuleValue(expectedValue);
+    return acc;
+  }, {});
+}
+
+function isDriftFactDraftValid(draft: DriftFactDraft): boolean {
+  return Boolean(draft.fact_name.trim() && draft.expected_value.trim());
+}
+
+function createEmptyComplianceRuleDraft(): ComplianceRuleDraft {
+  return {
+    id: createRuleId(),
+    name: '',
+    description: '',
+    fact_name: '',
+    operator: 'equals',
+    expected_value: '',
+    severity: 'medium',
+  };
+}
+
+function toComplianceRuleDraft(rule: ComplianceRule): ComplianceRuleDraft {
+  return {
+    id: rule.id,
+    name: rule.name,
+    description: rule.description || '',
+    fact_name: rule.fact_name,
+    operator: rule.operator,
+    expected_value:
+      typeof rule.expected_value === 'string'
+        ? rule.expected_value
+        : JSON.stringify(rule.expected_value),
+    severity: rule.severity,
+  };
+}
+
+function parseComplianceRuleValue(rawValue: string): unknown {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+function toComplianceRule(draft: ComplianceRuleDraft): ComplianceRule {
+  return {
+    id: draft.id,
+    name: draft.name.trim(),
+    description: draft.description.trim() || undefined,
+    fact_name: draft.fact_name.trim(),
+    operator: draft.operator,
+    expected_value: parseComplianceRuleValue(draft.expected_value),
+    severity: draft.severity,
+  };
+}
+
+function isComplianceRuleDraftValid(rule: ComplianceRuleDraft): boolean {
+  return Boolean(
+    rule.name.trim() &&
+      rule.fact_name.trim() &&
+      rule.operator.trim() &&
+      rule.expected_value.trim(),
+  );
+}
+
+const COMPLIANCE_OPERATORS = [
+  { value: 'equals', label: 'Equals' },
+  { value: 'not_equals', label: 'Does Not Equal' },
+  { value: 'contains', label: 'Contains' },
+  { value: 'not_contains', label: 'Does Not Contain' },
+  { value: 'matches', label: 'Matches Regex' },
+  { value: 'exists', label: 'Exists' },
+  { value: 'not_exists', label: 'Does Not Exist' },
+  { value: 'greater_than', label: 'Greater Than' },
+  { value: 'less_than', label: 'Less Than' },
+] as const;
+
+const SEVERITY_OPTIONS: SeverityLevel[] = ['low', 'medium', 'high', 'critical'];
+
 export default function Analytics() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [selectedFact, setSelectedFact] = useState<string>('os.family');
@@ -93,6 +237,7 @@ export default function Analytics() {
   const [showNewComplianceModal, setShowNewComplianceModal] = useState(false);
   const [showNewDriftModal, setShowNewDriftModal] = useState(false);
   const [editingComplianceBaseline, setEditingComplianceBaseline] = useState<ComplianceBaseline | null>(null);
+  const [editingDriftBaseline, setEditingDriftBaseline] = useState<DriftBaseline | null>(null);
   const [reportResult, setReportResult] = useState<ReportResult | null>(null);
   const [generatingReport, setGeneratingReport] = useState<string | null>(null);
 
@@ -120,11 +265,11 @@ export default function Analytics() {
     isLoading: reportsLoading,
     refetch: refetchReports,
   } = useQuery({
-    queryKey: ['reports', { limit: 5000, since: '30d' }],
+    queryKey: ['reports', { limit: 10000, since: '30d' }],
     queryFn: () => {
       const since = new Date();
       since.setDate(since.getDate() - 30);
-      return api.getReports({ limit: 5000, since: since.toISOString() });
+      return api.getReports({ limit: 10000, since: since.toISOString() });
     },
   });
 
@@ -161,7 +306,13 @@ export default function Analytics() {
   const updateComplianceBaseline = useUpdateComplianceBaseline();
   const deleteComplianceBaseline = useDeleteComplianceBaseline();
   const createDriftBaseline = useCreateDriftBaseline();
+  const updateDriftBaseline = useUpdateDriftBaseline();
   const deleteDriftBaseline = useDeleteDriftBaseline();
+
+  const groupNameById = useMemo(
+    () => new Map(groups.map((group) => [group.id, group.name])),
+    [groups],
+  );
 
   // Transform reports to heatmap data
   const heatmapData = useMemo(() => {
@@ -713,7 +864,7 @@ export default function Analytics() {
               <h3 className="text-lg font-semibold text-gray-900">Drift Baselines</h3>
               <button
                 onClick={() => setShowNewDriftModal(true)}
-                className="btn-primary flex items-center gap-2"
+                className="btn btn-primary flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" />
                 New Baseline
@@ -741,19 +892,48 @@ export default function Analytics() {
                           <p className="text-sm text-gray-500 mt-1">{baseline.description}</p>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleDeleteDriftBaseline(baseline.id)}
-                        className="p-1 text-danger-600 hover:bg-danger-50 rounded"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setEditingDriftBaseline(baseline)}
+                          className="p-1 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded"
+                          title="Edit baseline"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDriftBaseline(baseline.id)}
+                          className="p-1 text-gray-400 hover:text-danger-600 hover:bg-danger-50 rounded"
+                          title="Delete baseline"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                     <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
                       <span>{Object.keys(baseline.baseline_facts).length} facts tracked</span>
-                      {baseline.node_group_id && (
-                        <span>Group: {baseline.node_group_id}</span>
-                      )}
+                      <span>
+                        Scope: {baseline.node_group_id
+                          ? groupNameById.get(baseline.node_group_id) || baseline.node_group_id
+                          : 'All nodes'}
+                      </span>
                     </div>
+                    {Object.keys(baseline.baseline_facts).length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {Object.keys(baseline.baseline_facts).slice(0, 4).map((factName) => (
+                          <span
+                            key={factName}
+                            className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700"
+                          >
+                            {factName}
+                          </span>
+                        ))}
+                        {Object.keys(baseline.baseline_facts).length > 4 && (
+                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500">
+                            +{Object.keys(baseline.baseline_facts).length - 4} more
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="mt-2 text-xs text-gray-400">
                       Created {formatDate(baseline.created_at)}
                     </div>
@@ -781,6 +961,7 @@ export default function Analytics() {
       {/* New Compliance Baseline Modal */}
       {showNewComplianceModal && (
         <NewComplianceBaselineModal
+          factNames={factNames}
           onClose={() => setShowNewComplianceModal(false)}
           onCreate={async (data) => {
             await createComplianceBaseline.mutateAsync(data);
@@ -793,6 +974,7 @@ export default function Analytics() {
       {editingComplianceBaseline && (
         <EditComplianceBaselineModal
           baseline={editingComplianceBaseline}
+          factNames={factNames}
           onClose={() => setEditingComplianceBaseline(null)}
           onUpdate={async (data) => {
             await updateComplianceBaseline.mutateAsync({
@@ -807,10 +989,28 @@ export default function Analytics() {
       {/* New Drift Baseline Modal */}
       {showNewDriftModal && (
         <NewDriftBaselineModal
+          factNames={factNames}
+          groups={groups}
           onClose={() => setShowNewDriftModal(false)}
           onCreate={async (data) => {
             await createDriftBaseline.mutateAsync(data);
             setShowNewDriftModal(false);
+          }}
+        />
+      )}
+
+      {editingDriftBaseline && (
+        <EditDriftBaselineModal
+          baseline={editingDriftBaseline}
+          factNames={factNames}
+          groups={groups}
+          onClose={() => setEditingDriftBaseline(null)}
+          onUpdate={async (data) => {
+            await updateDriftBaseline.mutateAsync({
+              id: editingDriftBaseline.id,
+              request: data,
+            });
+            setEditingDriftBaseline(null);
           }}
         />
       )}
@@ -1077,7 +1277,168 @@ function ComplianceBaselineHelp() {
             <li><strong>High</strong> &mdash; Important issues requiring prompt attention</li>
             <li><strong>Critical</strong> &mdash; Urgent, must be fixed immediately</li>
           </ul>
-          <p>After creating the baseline, you can edit it to add compliance rules that check specific facts against expected values.</p>
+          <p>Add one or more rules below to check specific facts against the expected values for this baseline.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ComplianceRuleEditor({
+  rules,
+  onChange,
+  factNames,
+}: {
+  rules: ComplianceRuleDraft[];
+  onChange: (rules: ComplianceRuleDraft[]) => void;
+  factNames: string[];
+}) {
+  const updateRule = (
+    ruleId: string,
+    field: keyof ComplianceRuleDraft,
+    value: string,
+  ) => {
+    onChange(
+      rules.map((rule) =>
+        rule.id === ruleId ? { ...rule, [field]: value } : rule,
+      ),
+    );
+  };
+
+  const removeRule = (ruleId: string) => {
+    onChange(rules.filter((rule) => rule.id !== ruleId));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-semibold text-gray-900">Compliance Rules</h4>
+          <p className="text-xs text-gray-500 mt-1">
+            Create fact-based checks for this baseline.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange([...rules, createEmptyComplianceRuleDraft()])}
+          className="btn btn-secondary text-sm flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          Add Rule
+        </button>
+      </div>
+
+      {rules.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-sm text-gray-500 text-center">
+          No rules configured yet. Add at least one rule so this baseline can evaluate compliance.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {rules.map((rule, index) => (
+            <div key={rule.id} className="rounded-lg border border-gray-200 p-4 space-y-4 bg-gray-50/60">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h5 className="text-sm font-medium text-gray-900">Rule {index + 1}</h5>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Define the fact, operator, expected value, and severity.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeRule(rule.id)}
+                  className="p-2 text-gray-400 hover:text-danger-600 hover:bg-danger-50 rounded-lg transition-colors"
+                  title="Delete rule"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rule Name</label>
+                  <input
+                    type="text"
+                    value={rule.name}
+                    onChange={(e) => updateRule(rule.id, 'name', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    placeholder="e.g. Puppet agent service enabled"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Severity</label>
+                  <select
+                    value={rule.severity}
+                    onChange={(e) => updateRule(rule.id, 'severity', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  >
+                    {SEVERITY_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option.charAt(0).toUpperCase() + option.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fact Name</label>
+                  <input
+                    type="text"
+                    list={`compliance-facts-${rule.id}`}
+                    value={rule.fact_name}
+                    onChange={(e) => updateRule(rule.id, 'fact_name', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    placeholder="e.g. service_status.puppet"
+                    required
+                  />
+                  <datalist id={`compliance-facts-${rule.id}`}>
+                    {factNames.map((factName) => (
+                      <option key={factName} value={factName} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Operator</label>
+                  <select
+                    value={rule.operator}
+                    onChange={(e) => updateRule(rule.id, 'operator', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  >
+                    {COMPLIANCE_OPERATORS.map((operator) => (
+                      <option key={operator.value} value={operator.value}>
+                        {operator.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <input
+                  type="text"
+                  value={rule.description}
+                  onChange={(e) => updateRule(rule.id, 'description', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  placeholder="Optional explanation for what this rule checks"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Expected Value</label>
+                <textarea
+                  value={rule.expected_value}
+                  onChange={(e) => updateRule(rule.id, 'expected_value', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-mono text-sm"
+                  placeholder={'Examples: true, "running", 22, ["prod", "stage"]'}
+                  rows={2}
+                  required
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Values are parsed as JSON when possible; otherwise they are stored as plain text.
+                </p>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -1086,16 +1447,21 @@ function ComplianceBaselineHelp() {
 
 // New Compliance Baseline Modal
 function NewComplianceBaselineModal({
+  factNames,
   onClose,
   onCreate,
 }: {
+  factNames: string[];
   onClose: () => void;
   onCreate: (data: { name: string; description?: string; rules: Array<{ id: string; name: string; fact_name: string; operator: string; expected_value: unknown; severity: 'low' | 'medium' | 'high' | 'critical' }>; severity_level?: 'low' | 'medium' | 'high' | 'critical' }) => Promise<void>;
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [severity, setSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
+  const [severity, setSeverity] = useState<SeverityLevel>('medium');
+  const [rules, setRules] = useState<ComplianceRuleDraft[]>([createEmptyComplianceRuleDraft()]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const hasInvalidRules = rules.some((rule) => !isComplianceRuleDraftValid(rule));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1104,7 +1470,7 @@ function NewComplianceBaselineModal({
       await onCreate({
         name,
         description: description || undefined,
-        rules: [],
+        rules: rules.map(toComplianceRule),
         severity_level: severity,
       });
     } finally {
@@ -1146,7 +1512,7 @@ function NewComplianceBaselineModal({
               <label className="block text-sm font-medium text-gray-700 mb-1">Severity Level</label>
               <select
                 value={severity}
-                onChange={(e) => setSeverity(e.target.value as 'low' | 'medium' | 'high' | 'critical')}
+                onChange={(e) => setSeverity(e.target.value as SeverityLevel)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               >
                 <option value="low">Low</option>
@@ -1155,19 +1521,24 @@ function NewComplianceBaselineModal({
                 <option value="critical">Critical</option>
               </select>
             </div>
+            <ComplianceRuleEditor
+              rules={rules}
+              onChange={setRules}
+              factNames={factNames}
+            />
           </div>
           <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              className="btn btn-secondary"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !name}
-              className="btn-primary"
+              disabled={isSubmitting || !name.trim() || rules.length === 0 || hasInvalidRules}
+              className="btn btn-primary"
             >
               {isSubmitting ? 'Creating...' : 'Create Baseline'}
             </button>
@@ -1181,17 +1552,26 @@ function NewComplianceBaselineModal({
 // Edit Compliance Baseline Modal
 function EditComplianceBaselineModal({
   baseline,
+  factNames,
   onClose,
   onUpdate,
 }: {
   baseline: ComplianceBaseline;
+  factNames: string[];
   onClose: () => void;
   onUpdate: (data: { name?: string; description?: string | null; rules?: Array<{ id: string; name: string; description?: string; fact_name: string; operator: string; expected_value: unknown; severity: 'low' | 'medium' | 'high' | 'critical' }>; severity_level?: 'low' | 'medium' | 'high' | 'critical' }) => Promise<void>;
 }) {
   const [name, setName] = useState(baseline.name);
   const [description, setDescription] = useState(baseline.description || '');
-  const [severity, setSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>(baseline.severity_level);
+  const [severity, setSeverity] = useState<SeverityLevel>(baseline.severity_level);
+  const [rules, setRules] = useState<ComplianceRuleDraft[]>(
+    baseline.rules.length > 0
+      ? baseline.rules.map(toComplianceRuleDraft)
+      : [createEmptyComplianceRuleDraft()],
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const hasInvalidRules = rules.some((rule) => !isComplianceRuleDraftValid(rule));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1200,6 +1580,7 @@ function EditComplianceBaselineModal({
       await onUpdate({
         name,
         description: description || null,
+        rules: rules.map(toComplianceRule),
         severity_level: severity,
       });
     } finally {
@@ -1238,7 +1619,7 @@ function EditComplianceBaselineModal({
               <label className="block text-sm font-medium text-gray-700 mb-1">Severity Level</label>
               <select
                 value={severity}
-                onChange={(e) => setSeverity(e.target.value as 'low' | 'medium' | 'high' | 'critical')}
+                onChange={(e) => setSeverity(e.target.value as SeverityLevel)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               >
                 <option value="low">Low</option>
@@ -1247,22 +1628,27 @@ function EditComplianceBaselineModal({
                 <option value="critical">Critical</option>
               </select>
             </div>
+            <ComplianceRuleEditor
+              rules={rules}
+              onChange={setRules}
+              factNames={factNames}
+            />
             <div className="text-xs text-gray-400">
-              {baseline.rules.length} rule{baseline.rules.length !== 1 ? 's' : ''} configured &middot; Created {new Date(baseline.created_at).toLocaleDateString()}
+              {rules.length} rule{rules.length !== 1 ? 's' : ''} configured &middot; Created {new Date(baseline.created_at).toLocaleDateString()}
             </div>
           </div>
           <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              className="btn btn-secondary"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !name}
-              className="btn-primary"
+              disabled={isSubmitting || !name.trim() || rules.length === 0 || hasInvalidRules}
+              className="btn btn-primary"
             >
               {isSubmitting ? 'Saving...' : 'Save Changes'}
             </button>
@@ -1274,16 +1660,130 @@ function EditComplianceBaselineModal({
 }
 
 // New Drift Baseline Modal
+function DriftFactEditor({
+  facts,
+  onChange,
+  factNames,
+}: {
+  facts: DriftFactDraft[];
+  onChange: (facts: DriftFactDraft[]) => void;
+  factNames: string[];
+}) {
+  const updateFact = (factId: string, field: keyof DriftFactDraft, value: string) => {
+    onChange(
+      facts.map((fact) => (fact.id === factId ? { ...fact, [field]: value } : fact)),
+    );
+  };
+
+  const addFact = () => {
+    onChange([...facts, createEmptyDriftFactDraft()]);
+  };
+
+  const removeFact = (factId: string) => {
+    onChange(facts.filter((fact) => fact.id !== factId));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-semibold text-gray-900">Tracked Facts</h4>
+          <p className="text-xs text-gray-500 mt-1">
+            Define the facts and expected values that this baseline should monitor.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={addFact}
+          className="btn btn-secondary text-sm flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          Add Fact
+        </button>
+      </div>
+
+      {facts.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-sm text-gray-500 text-center">
+          No facts configured yet. Add at least one fact so drift detection knows what to compare.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {facts.map((fact, index) => (
+            <div key={fact.id} className="rounded-lg border border-gray-200 p-4 space-y-4 bg-gray-50/60">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h5 className="text-sm font-medium text-gray-900">Fact {index + 1}</h5>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Compare a specific fact against the expected baseline value.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeFact(fact.id)}
+                  className="p-2 text-gray-400 hover:text-danger-600 hover:bg-danger-50 rounded-lg transition-colors"
+                  title="Delete fact"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fact Name</label>
+                  <input
+                    type="text"
+                    list="drift-fact-names"
+                    value={fact.fact_name}
+                    onChange={(e) => updateFact(fact.id, 'fact_name', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    placeholder="e.g. os.family"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Expected Value</label>
+                  <input
+                    type="text"
+                    value={fact.expected_value}
+                    onChange={(e) => updateFact(fact.id, 'expected_value', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    placeholder='e.g. "RedHat", 8, true, or {"family":"RedHat"}'
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <datalist id="drift-fact-names">
+        {factNames.map((factName) => (
+          <option key={factName} value={factName} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
 function NewDriftBaselineModal({
   onClose,
   onCreate,
+  factNames,
+  groups,
 }: {
   onClose: () => void;
   onCreate: (data: { name: string; description?: string; baseline_facts: Record<string, unknown>; node_group_id?: string }) => Promise<void>;
+  factNames: string[];
+  groups: NodeGroup[];
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [nodeGroupId, setNodeGroupId] = useState('');
+  const [trackedFacts, setTrackedFacts] = useState<DriftFactDraft[]>([createEmptyDriftFactDraft()]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const validFacts = trackedFacts.filter(isDriftFactDraftValid);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1291,8 +1791,9 @@ function NewDriftBaselineModal({
     try {
       await onCreate({
         name,
-        description: description || undefined,
-        baseline_facts: {},
+        description: description.trim() || undefined,
+        node_group_id: nodeGroupId || undefined,
+        baseline_facts: toDriftBaselineFacts(trackedFacts),
       });
     } finally {
       setIsSubmitting(false);
@@ -1300,47 +1801,165 @@ function NewDriftBaselineModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">New Drift Baseline</h3>
         </div>
         <form onSubmit={handleSubmit}>
-          <div className="px-6 py-4 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                required
-              />
+          <div className="px-6 py-4 space-y-6">
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  rows={3}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Node Group</label>
+                <select
+                  value={nodeGroupId}
+                  onChange={(e) => setNodeGroupId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                >
+                  <option value="">All nodes</option>
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                rows={3}
-              />
-            </div>
+
+            <DriftFactEditor facts={trackedFacts} onChange={setTrackedFacts} factNames={factNames} />
           </div>
           <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-            >
+            <button type="button" onClick={onClose} className="btn btn-secondary">
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !name}
-              className="btn-primary"
+              disabled={isSubmitting || !name.trim() || validFacts.length === 0}
+              className="btn btn-primary"
             >
               {isSubmitting ? 'Creating...' : 'Create Baseline'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditDriftBaselineModal({
+  baseline,
+  factNames,
+  groups,
+  onClose,
+  onUpdate,
+}: {
+  baseline: DriftBaseline;
+  factNames: string[];
+  groups: NodeGroup[];
+  onClose: () => void;
+  onUpdate: (data: { name?: string; description?: string | null; baseline_facts?: Record<string, unknown>; node_group_id?: string | null }) => Promise<void>;
+}) {
+  const [name, setName] = useState(baseline.name);
+  const [description, setDescription] = useState(baseline.description || '');
+  const [nodeGroupId, setNodeGroupId] = useState(baseline.node_group_id || '');
+  const [trackedFacts, setTrackedFacts] = useState<DriftFactDraft[]>(
+    toDriftFactDrafts(baseline.baseline_facts),
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const validFacts = trackedFacts.filter(isDriftFactDraftValid);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      await onUpdate({
+        name: name.trim(),
+        description: description.trim() || null,
+        baseline_facts: toDriftBaselineFacts(trackedFacts),
+        node_group_id: nodeGroupId || null,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">Edit Drift Baseline</h3>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="px-6 py-4 space-y-6">
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  rows={3}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Node Group</label>
+                <select
+                  value={nodeGroupId}
+                  onChange={(e) => setNodeGroupId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                >
+                  <option value="">All nodes</option>
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <DriftFactEditor facts={trackedFacts} onChange={setTrackedFacts} factNames={factNames} />
+          </div>
+          <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+            <button type="button" onClick={onClose} className="btn btn-secondary">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || !name.trim() || validFacts.length === 0}
+              className="btn btn-primary"
+            >
+              {isSubmitting ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </form>

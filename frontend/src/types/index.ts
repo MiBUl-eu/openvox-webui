@@ -1240,6 +1240,14 @@ export interface CreateDriftBaselineRequest {
   tolerance_config?: DriftToleranceConfig;
 }
 
+export interface UpdateDriftBaselineRequest {
+  name?: string;
+  description?: string | null;
+  node_group_id?: string | null;
+  baseline_facts?: Record<string, unknown>;
+  tolerance_config?: DriftToleranceConfig | null;
+}
+
 // Report Results
 export interface NodeHealthSummary {
   total_nodes: number;

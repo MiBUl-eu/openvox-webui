@@ -4,7 +4,12 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AccessDenied } from './components/AccessDenied';
 import ForcePasswordChange from './components/ForcePasswordChange';
-import { useAuthStore } from './stores/authStore';
+import {
+  getLastSessionActivity,
+  recordSessionActivity,
+  SESSION_IDLE_TIMEOUT_MS,
+  useAuthStore,
+} from './stores/authStore';
 import { usePermissionsStore } from './stores/permissionsStore';
 
 // Lazy load all page components for code splitting
@@ -41,6 +46,7 @@ const PageLoader = () => (
 function App() {
   const user = useAuthStore((state) => state.user);
   const login = useAuthStore((state) => state.login);
+  const logout = useAuthStore((state) => state.logout);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const permissions = usePermissionsStore((state) => state.permissions);
   const fetchPermissions = usePermissionsStore((state) => state.fetchPermissions);
@@ -59,6 +65,55 @@ function App() {
       setShowForcePasswordChange(true);
     }
   }, [isAuthenticated, user?.force_password_change]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined;
+    }
+
+    let lastRecordedAt = getLastSessionActivity();
+    recordSessionActivity(lastRecordedAt);
+
+    const handleActivity = () => {
+      const now = Date.now();
+      if (now - lastRecordedAt >= 10_000) {
+        lastRecordedAt = now;
+        recordSessionActivity(now);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleActivity();
+      }
+    };
+
+    const checkIdleTimeout = () => {
+      if (Date.now() - getLastSessionActivity() > SESSION_IDLE_TIMEOUT_MS) {
+        logout('Your session expired after 30 minutes of inactivity.');
+        window.location.replace('/login');
+      }
+    };
+
+    const events: Array<keyof WindowEventMap> = [
+      'mousedown',
+      'keydown',
+      'scroll',
+      'touchstart',
+      'click',
+      'mousemove',
+    ];
+
+    events.forEach((eventName) => window.addEventListener(eventName, handleActivity, { passive: true }));
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const intervalId = window.setInterval(checkIdleTimeout, 60_000);
+
+    return () => {
+      events.forEach((eventName) => window.removeEventListener(eventName, handleActivity));
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [isAuthenticated, logout]);
 
   const handlePasswordChangeSuccess = () => {
     // Update user state to clear force_password_change flag

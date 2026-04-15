@@ -27,11 +27,6 @@ export default function SamlCallback() {
       return;
     }
 
-    // Store refresh token
-    if (refreshToken) {
-      localStorage.setItem('refresh_token', refreshToken);
-    }
-
     // Decode the JWT to get user info
     try {
       const payload = JSON.parse(atob(accessToken.split('.')[1]));
@@ -42,7 +37,8 @@ export default function SamlCallback() {
           email: payload.email,
           role: payload.roles?.[0] || 'viewer',
         },
-        accessToken
+        accessToken,
+        refreshToken || undefined
       );
       fetchPermissions(payload.sub);
       navigate(redirect, { replace: true });
