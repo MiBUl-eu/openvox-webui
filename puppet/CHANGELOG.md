@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Add cancel button to Update Jobs UI for jobs in `pending_approval`, `approved`, or `in_progress` states
+- Add `POST /api/v1/inventory/updates/{job_id}/cancel` endpoint to cancel update jobs
+
+### Fixed
+- Fix report metrics over time chart by fetching 30-day report data window (`since`) with higher limit and using linear interpolation to avoid misleading smoothing
+- Fix hung/stale update jobs: dispatched targets that receive no agent response within 2 hours are automatically marked as failed and the parent job status is rolled up accordingly
+
+### Added
 - Add edit functionality for compliance baselines (PUT endpoint + edit modal)
 - Add help guide to the new compliance baseline modal with tips on naming, severity levels, and rules
 - Add placeholder text in compliance baseline form fields for better UX

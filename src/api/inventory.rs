@@ -28,6 +28,7 @@ pub fn routes() -> Router<AppState> {
         .route("/updates/preview", post(preview_update_job))
         .route("/updates/{job_id}", get(get_update_job))
         .route("/updates/{job_id}/approve", post(approve_update_job))
+        .route("/updates/{job_id}/cancel", post(cancel_update_job))
         .route("/dashboard", get(get_inventory_dashboard))
         .route(
             "/dashboard/outdated-software/{name}",
@@ -297,6 +298,23 @@ async fn approve_update_job(
         )
         .await
         .map_err(|e| AppError::Internal(format!("Failed to update job approval state: {}", e)))?
+        .ok_or_else(|| AppError::NotFound(format!("Update job '{}' not found", job_id)))?;
+
+    Ok(Json(job))
+}
+
+async fn cancel_update_job(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+    Path(job_id): Path<String>,
+) -> AppResult<Json<UpdateJob>> {
+    require_inventory_update_write(&auth_user)?;
+
+    let repo = InventoryRepository::new(state.db.clone());
+    let job = repo
+        .cancel_update_job(&job_id, &auth_user.username)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to cancel update job: {}", e)))?
         .ok_or_else(|| AppError::NotFound(format!("Update job '{}' not found", job_id)))?;
 
     Ok(Json(job))

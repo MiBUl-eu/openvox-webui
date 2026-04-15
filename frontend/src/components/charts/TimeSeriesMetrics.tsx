@@ -229,7 +229,7 @@ export default function TimeSeriesMetrics({
             <Tooltip content={<CustomTooltip />} />
             <Legend />
             <Area
-              type="monotone"
+              type="linear"
               dataKey="failed"
               stackId={showStacked ? '1' : undefined}
               stroke={COLORS.failed}
@@ -237,7 +237,7 @@ export default function TimeSeriesMetrics({
               name="Failed"
             />
             <Area
-              type="monotone"
+              type="linear"
               dataKey="changed"
               stackId={showStacked ? '1' : undefined}
               stroke={COLORS.changed}
@@ -245,7 +245,7 @@ export default function TimeSeriesMetrics({
               name="Changed"
             />
             <Area
-              type="monotone"
+              type="linear"
               dataKey="unchanged"
               stackId={showStacked ? '1' : undefined}
               stroke={COLORS.unchanged}

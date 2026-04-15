@@ -906,6 +906,141 @@ impl InventoryRepository {
         }
     }
 
+    pub async fn cancel_update_job(
+        &self,
+        job_id: &str,
+        cancelled_by: &str,
+    ) -> Result<Option<UpdateJob>> {
+        let current = self.get_update_job(job_id).await?;
+        let Some(job) = current else {
+            return Ok(None);
+        };
+
+        let cancellable = matches!(
+            job.status,
+            UpdateJobStatus::PendingApproval
+                | UpdateJobStatus::Approved
+                | UpdateJobStatus::InProgress
+        );
+        if !cancellable {
+            anyhow::bail!(
+                "Update job cannot be cancelled in its current state ({})",
+                job.status.as_str()
+            );
+        }
+
+        let now = Utc::now();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin cancel update job transaction")?;
+
+        sqlx::query(
+            "UPDATE update_jobs SET status = 'cancelled', approved_by = COALESCE(approved_by, ?1), updated_at = ?2 WHERE id = ?3",
+        )
+        .bind(cancelled_by)
+        .bind(now.to_rfc3339())
+        .bind(job_id)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to cancel update job")?;
+
+        // Cancel all non-terminal targets (pending_approval, queued, dispatched)
+        sqlx::query(
+            "UPDATE update_job_targets SET status = 'cancelled', completed_at = ?1, updated_at = ?1 WHERE job_id = ?2 AND status IN ('pending_approval', 'queued', 'dispatched')",
+        )
+        .bind(now.to_rfc3339())
+        .bind(job_id)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to cancel update job targets")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit cancel update job transaction")?;
+
+        self.get_update_job(job_id).await
+    }
+
+    pub async fn timeout_stale_dispatched_targets(&self, timeout_minutes: i64) -> Result<u64> {
+        let now = Utc::now();
+        let cutoff = now - chrono::Duration::minutes(timeout_minutes);
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin stale target timeout transaction")?;
+
+        // Find jobs with stale dispatched targets
+        let stale_job_ids = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT DISTINCT job_id
+            FROM update_job_targets
+            WHERE status = 'dispatched'
+              AND dispatched_at IS NOT NULL
+              AND datetime(dispatched_at) <= datetime(?1)
+            "#,
+        )
+        .bind(cutoff.to_rfc3339())
+        .fetch_all(&mut *tx)
+        .await
+        .context("Failed to query stale dispatched targets")?;
+
+        if stale_job_ids.is_empty() {
+            tx.commit().await.ok();
+            return Ok(0);
+        }
+
+        // Mark stale dispatched targets as failed
+        let result = sqlx::query(
+            r#"
+            UPDATE update_job_targets
+            SET status = 'failed',
+                completed_at = ?1,
+                last_error = 'Timed out: no response from agent',
+                updated_at = ?1
+            WHERE status = 'dispatched'
+              AND dispatched_at IS NOT NULL
+              AND datetime(dispatched_at) <= datetime(?2)
+            "#,
+        )
+        .bind(now.to_rfc3339())
+        .bind(cutoff.to_rfc3339())
+        .execute(&mut *tx)
+        .await
+        .context("Failed to mark stale targets as failed")?;
+
+        let timed_out = result.rows_affected();
+
+        // Roll up job status for affected jobs
+        for job_id in &stale_job_ids {
+            let target_rows = sqlx::query_as::<_, UpdateJobTargetStateRow>(
+                "SELECT id, job_id, certname, status FROM update_job_targets WHERE job_id = ?1",
+            )
+            .bind(job_id)
+            .fetch_all(&mut *tx)
+            .await
+            .with_context(|| format!("Failed to fetch targets for rollup on job '{job_id}'"))?;
+
+            let rolled_up = roll_up_update_job_status(&target_rows);
+            sqlx::query("UPDATE update_jobs SET status = ?1, updated_at = ?2 WHERE id = ?3")
+                .bind(rolled_up.as_str())
+                .bind(now.to_rfc3339())
+                .bind(job_id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("Failed to rollup job status for '{job_id}'"))?;
+        }
+
+        tx.commit()
+            .await
+            .context("Failed to commit stale target timeout transaction")?;
+
+        Ok(timed_out)
+    }
+
     pub async fn approve_update_job(
         &self,
         job_id: &str,

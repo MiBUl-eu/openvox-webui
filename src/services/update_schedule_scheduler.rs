@@ -76,6 +76,10 @@ async fn schedule_check_task(state: UpdateScheduleSchedulerState) {
         if let Err(e) = process_due_schedules(&state.pool).await {
             error!("Update schedule check failed: {}", e);
         }
+
+        if let Err(e) = timeout_stale_jobs(&state.pool).await {
+            error!("Stale job timeout check failed: {}", e);
+        }
     }
 }
 
@@ -197,4 +201,17 @@ fn compute_next_run(
         "one_time" => None, // one-time schedules don't have a next run
         _ => None,
     }
+}
+
+/// Times out dispatched targets that haven't reported back within 2 hours.
+async fn timeout_stale_jobs(pool: &SqlitePool) -> anyhow::Result<()> {
+    let inv_repo = InventoryRepository::new(pool.clone());
+    let timed_out = inv_repo.timeout_stale_dispatched_targets(120).await?;
+    if timed_out > 0 {
+        warn!(
+            "Timed out {} stale dispatched update target(s) (no agent response within 2 hours)",
+            timed_out
+        );
+    }
+    Ok(())
 }

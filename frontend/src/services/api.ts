@@ -321,6 +321,11 @@ export const api = {
     return response.data;
   },
 
+  cancelUpdateJob: async (jobId: string): Promise<UpdateJob> => {
+    const response = await client.post(`/inventory/updates/${jobId}/cancel`);
+    return response.data;
+  },
+
   getInventoryCatalog: async (): Promise<RepositoryVersionCatalogEntry[]> => {
     const response = await client.get('/inventory/catalog');
     return response.data;

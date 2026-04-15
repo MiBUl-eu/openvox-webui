@@ -20,6 +20,7 @@ import {
   useInventoryCatalog,
   useCreateUpdateJob,
   useApproveUpdateJob,
+  useCancelUpdateJob,
   usePreviewUpdateJob,
   useOutdatedSoftwareNodes,
   useComplianceCategoryNodes,
@@ -641,6 +642,7 @@ function PreviewResult({ preview }: { preview: UpdatePreviewResponse }) {
 function UpdateJobsTab() {
   const { data: jobs, isLoading } = useUpdateJobs();
   const approveJob = useApproveUpdateJob();
+  const cancelJob = useCancelUpdateJob();
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
 
   if (isLoading) {
@@ -692,6 +694,20 @@ function UpdateJobsTab() {
                     Reject
                   </button>
                 </div>
+              )}
+              {(job.status === 'pending_approval' || job.status === 'approved' || job.status === 'in_progress') && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    if (window.confirm('Cancel this update job? All pending and in-progress targets will be marked as cancelled.')) {
+                      cancelJob.mutate(job.id);
+                    }
+                  }}
+                  disabled={cancelJob.isPending}
+                  className="px-3 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
               )}
             </div>
           </div>

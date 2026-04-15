@@ -120,8 +120,12 @@ export default function Analytics() {
     isLoading: reportsLoading,
     refetch: refetchReports,
   } = useQuery({
-    queryKey: ['reports', { limit: 500 }],
-    queryFn: () => api.getReports({ limit: 500 }),
+    queryKey: ['reports', { limit: 5000, since: '30d' }],
+    queryFn: () => {
+      const since = new Date();
+      since.setDate(since.getDate() - 30);
+      return api.getReports({ limit: 5000, since: since.toISOString() });
+    },
   });
 
   const {

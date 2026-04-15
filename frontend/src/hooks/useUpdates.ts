@@ -71,6 +71,17 @@ export function useApproveUpdateJob() {
   });
 }
 
+export function useCancelUpdateJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => api.cancelUpdateJob(jobId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['update-jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['update-job'] });
+    },
+  });
+}
+
 export function usePreviewUpdateJob() {
   return useMutation<UpdatePreviewResponse, Error, UpdatePreviewRequest>({
     mutationFn: (request: UpdatePreviewRequest) => cveApi.previewUpdateJob(request),
