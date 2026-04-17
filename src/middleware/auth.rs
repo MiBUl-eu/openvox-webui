@@ -242,9 +242,10 @@ impl IntoResponse for AuthError {
             AuthError::TokenExpired => {
                 (StatusCode::UNAUTHORIZED, "Authentication token has expired")
             }
-            AuthError::SessionExpired => {
-                (StatusCode::UNAUTHORIZED, "Session expired due to inactivity")
-            }
+            AuthError::SessionExpired => (
+                StatusCode::UNAUTHORIZED,
+                "Session expired due to inactivity",
+            ),
             AuthError::InvalidTokenType => (StatusCode::UNAUTHORIZED, "Invalid token type"),
         };
 
@@ -348,18 +349,26 @@ pub async fn ensure_auth_session_active(
     .map_err(|_| AuthError::InvalidToken)?
     .ok_or(AuthError::InvalidToken)?;
 
-    let revoked_at: Option<String> = row.try_get("revoked_at").map_err(|_| AuthError::InvalidToken)?;
+    let revoked_at: Option<String> = row
+        .try_get("revoked_at")
+        .map_err(|_| AuthError::InvalidToken)?;
     if revoked_at.is_some() {
         return Err(AuthError::SessionExpired);
     }
 
-    let last_activity_at: String = row.try_get("last_activity_at").map_err(|_| AuthError::InvalidToken)?;
-    let expires_at: String = row.try_get("expires_at").map_err(|_| AuthError::InvalidToken)?;
+    let last_activity_at: String = row
+        .try_get("last_activity_at")
+        .map_err(|_| AuthError::InvalidToken)?;
+    let expires_at: String = row
+        .try_get("expires_at")
+        .map_err(|_| AuthError::InvalidToken)?;
     let last_activity = parse_db_timestamp(&last_activity_at).ok_or(AuthError::InvalidToken)?;
     let absolute_expiry = parse_db_timestamp(&expires_at).ok_or(AuthError::InvalidToken)?;
     let now = Utc::now();
 
-    if now >= absolute_expiry || now >= last_activity + Duration::minutes(SESSION_IDLE_TIMEOUT_MINUTES) {
+    if now >= absolute_expiry
+        || now >= last_activity + Duration::minutes(SESSION_IDLE_TIMEOUT_MINUTES)
+    {
         let _ = revoke_auth_session(pool, session_id).await;
         return Err(AuthError::SessionExpired);
     }

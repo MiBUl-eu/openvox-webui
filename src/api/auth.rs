@@ -93,18 +93,21 @@ async fn login(
         .unwrap_or_else(|_| vec![user.role.clone()]);
 
     let session_id = Uuid::new_v4();
-    let session_expires_at = Utc::now() + Duration::days(state.config.auth.refresh_token_expiry_days as i64);
-    create_auth_session(&state.db, &session_id, &user.id, session_expires_at).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "internal_error".to_string(),
-                message: format!("Failed to create session: {}", auth_error_message(&e)),
-                details: None,
-                code: None,
-            }),
-        )
-    })?;
+    let session_expires_at =
+        Utc::now() + Duration::days(state.config.auth.refresh_token_expiry_days as i64);
+    create_auth_session(&state.db, &session_id, &user.id, session_expires_at)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "internal_error".to_string(),
+                    message: format!("Failed to create session: {}", auth_error_message(&e)),
+                    details: None,
+                    code: None,
+                }),
+            )
+        })?;
 
     // Create tokens
     let access_token = create_access_token(
@@ -286,14 +289,15 @@ struct LogoutResponse {
 /// POST /api/v1/auth/logout
 ///
 /// Revokes the current auth session when a bearer token is supplied.
-async fn logout(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Json<LogoutResponse> {
+async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Json<LogoutResponse> {
     if let Some(auth_header) = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer ")))
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+        })
     {
         if let Ok(token_data) = validate_token(auth_header, &state.config.auth.jwt_secret) {
             let _ = revoke_auth_session(&state.db, &token_data.claims.jti).await;

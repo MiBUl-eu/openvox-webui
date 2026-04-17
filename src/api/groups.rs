@@ -10,7 +10,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
-    db::{repository::GroupRepository, InventoryRepository},
+    db::repository::GroupRepository,
     middleware::AuthUser,
     models::{
         Action, AddPinnedNodeRequest, ClassificationRule, CreateGroupRequest,
@@ -490,7 +490,7 @@ async fn list_update_schedules(
 ) -> Result<Json<Vec<GroupUpdateSchedule>>, AppError> {
     check_group_permission(&state, &auth_user, Action::Read, None).await?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let schedules = repo.list_group_update_schedules(&id).await.map_err(|e| {
         tracing::error!("Failed to list update schedules: {}", e);
         AppError::internal("Failed to list update schedules")
@@ -508,7 +508,7 @@ async fn create_update_schedule(
     let uuid = Uuid::parse_str(&id).map_err(|_| AppError::bad_request("Invalid group ID"))?;
     check_group_permission(&state, &auth_user, Action::Update, Some(uuid)).await?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let schedule = repo
         .create_group_update_schedule(&id, &payload, &auth_user.username)
         .await
@@ -528,7 +528,7 @@ async fn get_update_schedule(
     let _uuid = Uuid::parse_str(&id).map_err(|_| AppError::bad_request("Invalid group ID"))?;
     check_group_permission(&state, &auth_user, Action::Read, None).await?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let schedule = repo
         .get_group_update_schedule(&schedule_id)
         .await
@@ -550,7 +550,7 @@ async fn update_update_schedule(
     let uuid = Uuid::parse_str(&id).map_err(|_| AppError::bad_request("Invalid group ID"))?;
     check_group_permission(&state, &auth_user, Action::Update, Some(uuid)).await?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let schedule = repo
         .update_group_update_schedule(&schedule_id, &payload)
         .await
@@ -571,7 +571,7 @@ async fn delete_update_schedule(
     let uuid = Uuid::parse_str(&id).map_err(|_| AppError::bad_request("Invalid group ID"))?;
     check_group_permission(&state, &auth_user, Action::Update, Some(uuid)).await?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let deleted = repo
         .delete_group_update_schedule(&schedule_id)
         .await
@@ -596,7 +596,7 @@ async fn run_update_schedule(
     let uuid = Uuid::parse_str(&id).map_err(|_| AppError::bad_request("Invalid group ID"))?;
     check_group_permission(&state, &auth_user, Action::Update, Some(uuid)).await?;
 
-    let inv_repo = InventoryRepository::new(state.db.clone());
+    let inv_repo = state.inventory_repository();
     let schedule = inv_repo
         .get_group_update_schedule(&schedule_id)
         .await

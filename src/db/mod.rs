@@ -13,6 +13,7 @@ pub mod audit_repository;
 pub mod backup_repository;
 pub mod code_deploy_repository;
 pub mod cve_repository;
+pub mod inventory_migration;
 pub mod inventory_repository;
 pub mod migrations;
 pub mod node_removal_repository;
@@ -161,6 +162,66 @@ async fn run_migrations(pool: &DbPool) -> Result<()> {
         Err(e) => {
             error!("Migration error: {}", e);
             Err(e).context("Failed to run database migrations")
+        }
+    }
+}
+
+/// Initialize the **dedicated inventory** database connection pool.
+///
+/// Inventory data (Phase-10 snapshots, packages, applications, containers,
+/// users, update-jobs, etc.) lives in its own SQLite file so high-write
+/// ingestion from Puppet agents does not block the main application DB's UI
+/// readers under SQLite's single-writer model.
+///
+/// `url` is the inventory database URL (e.g.
+/// `sqlite:///var/lib/openvox-webui/inventory.db`). `main_cfg` is only used to
+/// borrow sane pool sizing / timeouts from the main DB configuration.
+pub async fn init_inventory_pool(url: &str, main_cfg: &DatabaseConfig) -> Result<DbPool> {
+    let connect_options = url
+        .parse::<SqliteConnectOptions>()
+        .context("Failed to parse inventory database URL")?
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(main_cfg.connect_timeout_secs))
+        .create_if_missing(true);
+
+    info!("Initializing inventory database connection pool");
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(main_cfg.max_connections)
+        .min_connections(main_cfg.min_connections)
+        .acquire_timeout(Duration::from_secs(main_cfg.connect_timeout_secs))
+        .idle_timeout(Duration::from_secs(main_cfg.idle_timeout_secs))
+        .connect_with(connect_options)
+        .await
+        .context("Failed to create inventory database connection pool")?;
+
+    info!(
+        "Inventory database pool created: max={}, min={}",
+        main_cfg.max_connections, main_cfg.min_connections
+    );
+
+    run_inventory_migrations(&pool).await?;
+
+    Ok(pool)
+}
+
+/// Run migrations for the dedicated inventory database.
+///
+/// These live under `migrations/inventory/` and are applied only to the
+/// inventory pool. Kept separate from the main DB's migration set so the two
+/// schemas evolve independently.
+async fn run_inventory_migrations(pool: &DbPool) -> Result<()> {
+    info!("Running inventory database migrations");
+
+    match sqlx::migrate!("./migrations/inventory").run(pool).await {
+        Ok(_) => {
+            info!("Inventory database migrations completed successfully");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Inventory migration error: {}", e);
+            Err(e).context("Failed to run inventory database migrations")
         }
     }
 }

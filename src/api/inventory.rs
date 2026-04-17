@@ -10,7 +10,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
-    db::{repository::GroupRepository, CveRepository, InventoryRepository},
+    db::{repository::GroupRepository, CveRepository},
     middleware::AuthUser,
     models::{
         ApproveUpdateJobRequest, ComplianceCategoryNode, CreateUpdateJobRequest,
@@ -89,7 +89,7 @@ fn require_inventory_update_write(auth_user: &AuthUser) -> AppResult<()> {
 async fn get_inventory_summary(
     State(state): State<AppState>,
 ) -> AppResult<Json<InventoryFleetStatusSummary>> {
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let summary = repo
         .get_fleet_status_summary()
         .await
@@ -101,7 +101,7 @@ async fn get_inventory_summary(
 async fn get_inventory_dashboard(
     State(state): State<AppState>,
 ) -> AppResult<Json<InventoryDashboardReport>> {
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let report = repo
         .get_dashboard_report()
         .await
@@ -122,7 +122,7 @@ async fn get_outdated_software_nodes(
     Query(query): Query<OutdatedSoftwareQuery>,
 ) -> AppResult<Json<Vec<OutdatedSoftwareNodeDetail>>> {
     require_inventory_update_read(&auth_user)?;
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let nodes = repo
         .get_nodes_for_outdated_software(&name, query.software_type.as_deref())
         .await
@@ -138,7 +138,7 @@ async fn get_compliance_category_nodes(
     Path(category): Path<String>,
 ) -> AppResult<Json<Vec<ComplianceCategoryNode>>> {
     require_inventory_update_read(&auth_user)?;
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let nodes = repo
         .get_nodes_for_compliance_category(&category)
         .await
@@ -152,7 +152,7 @@ async fn list_version_catalog(
     State(state): State<AppState>,
     Query(query): Query<CatalogQuery>,
 ) -> AppResult<Json<Vec<RepositoryVersionCatalogEntry>>> {
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let mut entries = repo
         .list_version_catalog()
         .await
@@ -178,7 +178,7 @@ async fn list_update_jobs(
 ) -> AppResult<Json<Vec<UpdateJob>>> {
     require_inventory_update_read(&auth_user)?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let jobs = repo
         .list_update_jobs(query.limit.unwrap_or(50).min(200))
         .await
@@ -194,7 +194,7 @@ async fn get_update_job(
 ) -> AppResult<Json<UpdateJob>> {
     require_inventory_update_read(&auth_user)?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let job = repo
         .get_update_job(&job_id)
         .await
@@ -260,7 +260,7 @@ async fn create_update_job(
         }
     }
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let job = repo
         .create_update_job(
             payload.operation_type,
@@ -288,7 +288,7 @@ async fn approve_update_job(
 ) -> AppResult<Json<UpdateJob>> {
     require_inventory_update_write(&auth_user)?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let job = repo
         .approve_update_job(
             &job_id,
@@ -310,7 +310,7 @@ async fn cancel_update_job(
 ) -> AppResult<Json<UpdateJob>> {
     require_inventory_update_write(&auth_user)?;
 
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let job = repo
         .cancel_update_job(&job_id, &auth_user.username)
         .await
@@ -342,7 +342,7 @@ async fn preview_update_job(
     certnames.dedup();
     certnames.retain(|c| !c.trim().is_empty());
 
-    let inv_repo = InventoryRepository::new(state.db.clone());
+    let inv_repo = state.inventory_repository();
     let cve_repo = CveRepository::new(state.db.clone());
 
     let mut targets: Vec<UpdatePreviewTarget> = Vec::new();
@@ -427,7 +427,7 @@ async fn list_fleet_repositories(
     auth_user: AuthUser,
 ) -> AppResult<Json<Vec<FleetRepositoryConfig>>> {
     require_inventory_update_read(&auth_user)?;
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let configs = repo
         .list_fleet_repository_configs()
         .await
@@ -440,7 +440,7 @@ async fn trigger_repo_check(
     auth_user: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
     require_inventory_update_write(&auth_user)?;
-    let repo = InventoryRepository::new(state.db.clone());
+    let repo = state.inventory_repository();
     let service = crate::services::RepoCheckerService::new(repo, 120, 4);
     let summary = service
         .check_all_repos()

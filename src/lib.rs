@@ -13,9 +13,12 @@ pub mod models;
 pub mod services;
 pub mod utils;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 pub use config::AppConfig;
-use config::BackupConfig;
+use config::{BackupConfig, InventoryConfig};
 pub use db::DbPool;
+use db::InventoryRepository;
 pub use middleware::{
     auth_middleware, check_permission, optional_auth_middleware, require_permission_middleware,
     AuthUser, Claims, RbacError, RequirePermission,
@@ -33,8 +36,19 @@ use utils::AppError;
 pub struct AppState {
     /// Application configuration
     pub config: AppConfig,
-    /// Database connection pool
+    /// Database connection pool (main application DB)
     pub db: DbPool,
+    /// Database connection pool for the dedicated inventory database.
+    /// All Phase-10 inventory reads/writes go through this pool so that the
+    /// main DB's UI readers are not blocked by inventory ingestion writers.
+    pub inventory_db: DbPool,
+    /// Inventory configuration. Used to build `InventoryRepository` with the
+    /// correct `keep_raw_payload` setting on each request path.
+    pub inventory_config: InventoryConfig,
+    /// Becomes `true` once the one-shot inventory-migration has completed.
+    /// Inventory endpoints gate on this so we never serve stale/partial state
+    /// during the initial data-migration window on upgrade.
+    pub inventory_ready: Arc<AtomicBool>,
     /// PuppetDB client (optional)
     pub puppetdb: Option<Arc<PuppetDbClient>>,
     /// Puppet CA client (optional)
@@ -86,5 +100,21 @@ impl AppState {
         }
 
         Ok(BackupService::new(self.db.clone(), config))
+    }
+
+    /// Construct an `InventoryRepository` bound to the dedicated inventory
+    /// pool and configured with the current `keep_raw_payload` flag. Every
+    /// inventory code path should call this helper rather than
+    /// `InventoryRepository::new(state.db.clone())` — which would target the
+    /// main DB and recreate the pre-release write-contention problem.
+    pub fn inventory_repository(&self) -> InventoryRepository {
+        InventoryRepository::new(self.inventory_db.clone())
+            .with_keep_raw_payload(self.inventory_config.keep_raw_payload)
+    }
+
+    /// Whether the startup inventory-migration has completed. Handlers that
+    /// read or write inventory should return 503 when this is false.
+    pub fn is_inventory_ready(&self) -> bool {
+        self.inventory_ready.load(Ordering::Acquire)
     }
 }

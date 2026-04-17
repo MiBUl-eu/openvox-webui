@@ -286,7 +286,7 @@ async fn get_node_inventory(
     State(state): State<AppState>,
     Path(certname): Path<String>,
 ) -> AppResult<Json<NodeInventory>> {
-    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let inventory_repo = state.inventory_repository();
     let inventory = inventory_repo
         .get_current_inventory(&certname)
         .await
@@ -304,7 +304,7 @@ async fn get_node_inventory_history(
     Path(certname): Path<String>,
     Query(query): Query<InventoryHistoryQuery>,
 ) -> AppResult<Json<Vec<InventorySnapshotSummary>>> {
-    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let inventory_repo = state.inventory_repository();
     let history = inventory_repo
         .get_inventory_history(&certname, query.limit.unwrap_or(20).min(100))
         .await
@@ -639,14 +639,17 @@ async fn ingest_node_inventory(
 ) -> AppResult<(StatusCode, Json<NodeInventory>)> {
     authenticate_node_request(&state, &certname, &headers, &client_cert)?;
 
-    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let inventory_repo = state.inventory_repository();
     let inventory = inventory_repo
         .ingest_inventory(&certname, &payload)
         .await
         .map_err(|e| AppError::Internal(format!("Failed to ingest node inventory: {}", e)))?;
 
-    // Trigger background catalog and status refresh after ingestion
-    let db = state.db.clone();
+    // Trigger background catalog and status refresh after ingestion.
+    // Use the inventory DB pool (not the main DB) — these tables now live
+    // in the dedicated inventory database.
+    let inv_db = state.inventory_db.clone();
+    let keep_raw = state.inventory_config.keep_raw_payload;
     let stale_hours = state
         .config
         .inventory
@@ -654,7 +657,7 @@ async fn ingest_node_inventory(
         .map(|i| i.stale_after_hours)
         .unwrap_or(48);
     tokio::spawn(async move {
-        let repo = InventoryRepository::new(db);
+        let repo = InventoryRepository::new(inv_db).with_keep_raw_payload(keep_raw);
         match repo
             .refresh_version_catalog_debounced_from_ingest(
                 POST_INGEST_CATALOG_REFRESH_DEBOUNCE_SECS,
@@ -693,7 +696,7 @@ async fn get_pending_node_update_jobs(
 ) -> AppResult<Json<Vec<NodePendingUpdateJob>>> {
     authenticate_node_request(&state, &certname, &headers, &client_cert)?;
 
-    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let inventory_repo = state.inventory_repository();
     let jobs = inventory_repo
         .claim_pending_updates_for_node(&certname)
         .await
@@ -712,7 +715,7 @@ async fn submit_node_update_job_result(
 ) -> AppResult<Json<UpdateJob>> {
     authenticate_node_request(&state, &certname, &headers, &client_cert)?;
 
-    let inventory_repo = InventoryRepository::new(state.db.clone());
+    let inventory_repo = state.inventory_repository();
     let job = inventory_repo
         .submit_update_job_result(&job_id, &target_id, &certname, &payload)
         .await

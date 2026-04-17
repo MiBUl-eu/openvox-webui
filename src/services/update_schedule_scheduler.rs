@@ -19,14 +19,19 @@ type DbPool = SqlitePool;
 #[derive(Clone)]
 pub struct UpdateScheduleSchedulerState {
     running: Arc<RwLock<bool>>,
-    pool: DbPool,
+    /// Main application DB (node_groups, classification_rules, pinned_nodes).
+    main_pool: DbPool,
+    /// Dedicated inventory DB (update_jobs, update_job_targets,
+    /// update_job_results, group_update_schedules).
+    inventory_pool: DbPool,
 }
 
 impl UpdateScheduleSchedulerState {
-    pub fn new(pool: DbPool) -> Self {
+    pub fn new(main_pool: DbPool, inventory_pool: DbPool) -> Self {
         Self {
             running: Arc::new(RwLock::new(false)),
-            pool,
+            main_pool,
+            inventory_pool,
         }
     }
 
@@ -38,8 +43,11 @@ impl UpdateScheduleSchedulerState {
     }
 }
 
-pub fn start_update_schedule_scheduler(pool: DbPool) -> UpdateScheduleSchedulerState {
-    let state = UpdateScheduleSchedulerState::new(pool);
+pub fn start_update_schedule_scheduler(
+    main_pool: DbPool,
+    inventory_pool: DbPool,
+) -> UpdateScheduleSchedulerState {
+    let state = UpdateScheduleSchedulerState::new(main_pool, inventory_pool);
     let state_clone = state.clone();
 
     tokio::spawn(async move {
@@ -73,18 +81,21 @@ async fn schedule_check_task(state: UpdateScheduleSchedulerState) {
         }
         drop(running);
 
-        if let Err(e) = process_due_schedules(&state.pool).await {
+        if let Err(e) = process_due_schedules(&state.main_pool, &state.inventory_pool).await {
             error!("Update schedule check failed: {}", e);
         }
 
-        if let Err(e) = timeout_stale_jobs(&state.pool).await {
+        if let Err(e) = timeout_stale_jobs(&state.inventory_pool).await {
             error!("Stale job timeout check failed: {}", e);
         }
     }
 }
 
-async fn process_due_schedules(pool: &SqlitePool) -> anyhow::Result<()> {
-    let inv_repo = InventoryRepository::new(pool.clone());
+async fn process_due_schedules(
+    main_pool: &SqlitePool,
+    inventory_pool: &SqlitePool,
+) -> anyhow::Result<()> {
+    let inv_repo = InventoryRepository::new(inventory_pool.clone());
     let due_schedules = inv_repo.get_due_update_schedules().await?;
 
     if due_schedules.is_empty() {
@@ -92,7 +103,8 @@ async fn process_due_schedules(pool: &SqlitePool) -> anyhow::Result<()> {
     }
 
     info!("Processing {} due update schedules", due_schedules.len());
-    let group_repo = GroupRepository::new(pool);
+    // `GroupRepository` resolves node membership against the main DB.
+    let group_repo = GroupRepository::new(main_pool);
 
     for schedule in due_schedules {
         let group_id = match uuid::Uuid::parse_str(&schedule.group_id) {

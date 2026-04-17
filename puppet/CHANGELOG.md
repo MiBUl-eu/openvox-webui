@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Deployment note:** The packaged OpenVox WebUI service now uses a dedicated SQLite database for inventory data (`/var/lib/openvox-webui/inventory.db`). On the first start of v0.33.0 the service migrates existing inventory rows out of the main DB automatically; inventory endpoints return 503 until that completes. A one-time background `VACUUM` reclaims space on the main DB after the migration.
+- **systemd resource limits** raised: `MemoryHigh=3G`, `MemoryMax=6G` (was 1G/2G). `StartLimitIntervalSec` / `StartLimitBurst` moved under `[Unit]`.
+
 ### Added
 - Add cancel button to Update Jobs UI for jobs in `pending_approval`, `approved`, or `in_progress` states
 - Add `POST /api/v1/inventory/updates/{job_id}/cancel` endpoint to cancel update jobs

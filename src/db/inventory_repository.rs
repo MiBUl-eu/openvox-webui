@@ -23,6 +23,12 @@ use crate::models::{
 
 pub struct InventoryRepository {
     pool: SqlitePool,
+    /// When true, the full serialized `InventoryPayload` JSON is persisted
+    /// into `host_inventory_snapshots.raw_payload` on every ingest. Defaults
+    /// to false (the normalized per-item tables are sufficient for the UI and
+    /// storing the raw payload bloats the DB dramatically). Wire via
+    /// `with_keep_raw_payload` from `InventoryConfig::keep_raw_payload`.
+    keep_raw_payload: bool,
 }
 
 fn catalog_refresh_lock() -> &'static Mutex<()> {
@@ -36,8 +42,21 @@ fn last_ingest_catalog_refresh_ts() -> &'static AtomicI64 {
 }
 
 impl InventoryRepository {
+    /// Construct a repository bound to the given pool. Defaults to NOT writing
+    /// `raw_payload` — override with [`Self::with_keep_raw_payload`] when the
+    /// operator explicitly opts in via `inventory.keep_raw_payload: true`.
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            keep_raw_payload: false,
+        }
+    }
+
+    /// Builder-style setter for the `raw_payload` persistence flag. See
+    /// [`InventoryConfig::keep_raw_payload`].
+    pub fn with_keep_raw_payload(mut self, keep: bool) -> Self {
+        self.keep_raw_payload = keep;
+        self
     }
 
     pub async fn ingest_inventory(
@@ -48,8 +67,16 @@ impl InventoryRepository {
         let snapshot_id = Uuid::new_v4().to_string();
         let collected_at = payload.collected_at.unwrap_or_else(Utc::now);
         let now = Utc::now();
-        let raw_payload =
-            serde_json::to_string(payload).context("Failed to serialize inventory payload")?;
+        // `raw_payload` is written as NULL by default. Operators can opt back
+        // in by setting `inventory.keep_raw_payload: true`, but the normalized
+        // detail tables (packages, applications, containers, users, …) carry
+        // everything the UI reads, and persisting the raw JSON on every POST
+        // has bloated production databases into the multi-GB range.
+        let raw_payload: Option<String> = if self.keep_raw_payload {
+            Some(serde_json::to_string(payload).context("Failed to serialize inventory payload")?)
+        } else {
+            None
+        };
 
         let mut tx = self
             .pool
@@ -2232,6 +2259,96 @@ impl InventoryRepository {
 
         Ok(())
     }
+
+    // ------------------------------------------------------------------------
+    // Inventory DB maintenance
+    //
+    // Called on a timer by `services::inventory_maintenance::InventoryMaintenanceScheduler`
+    // to keep the inventory database bounded and responsive. The prune step
+    // has the largest impact — without it, every agent's daily snapshots
+    // accumulate forever and the DB file grows without bound.
+    // ------------------------------------------------------------------------
+
+    /// Retain the `max_per_node` most recent `host_inventory_snapshots` per
+    /// certname and delete the rest. Foreign-key `ON DELETE CASCADE` on the
+    /// detail tables (packages, applications, websites, runtimes, containers,
+    /// users, update_status) takes care of those rows.
+    ///
+    /// `max_per_node == 0` disables pruning and returns early.
+    pub async fn prune_snapshots(&self, max_per_node: u32) -> Result<PruneStats> {
+        if max_per_node == 0 {
+            return Ok(PruneStats::default());
+        }
+
+        // Delete all snapshot rows that are not in the top-N (by collected_at
+        // DESC) for their certname. Using a window-function partition rank
+        // keeps this to a single statement. SQLite 3.25+ supports ROW_NUMBER().
+        let rows_affected = sqlx::query(
+            r#"
+            DELETE FROM host_inventory_snapshots
+            WHERE id IN (
+                SELECT id FROM (
+                    SELECT id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY certname
+                               ORDER BY collected_at DESC, id DESC
+                           ) AS rn
+                    FROM host_inventory_snapshots
+                )
+                WHERE rn > ?1
+            )
+            "#,
+        )
+        .bind(max_per_node as i64)
+        .execute(&self.pool)
+        .await
+        .context("Failed to prune host_inventory_snapshots")?
+        .rows_affected();
+
+        Ok(PruneStats {
+            snapshots_deleted: rows_affected,
+        })
+    }
+
+    /// Force a WAL checkpoint with TRUNCATE mode so the `-wal` sidecar file
+    /// shrinks back to zero on disk. Safe to call while other connections
+    /// hold shared locks; may block briefly on a writer.
+    pub async fn checkpoint_wal(&self) -> Result<()> {
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);")
+            .execute(&self.pool)
+            .await
+            .context("Failed to checkpoint inventory DB WAL")?;
+        Ok(())
+    }
+
+    /// Re-run SQLite's query planner statistics. Cheap and safe at any time.
+    pub async fn optimize(&self) -> Result<()> {
+        sqlx::query("PRAGMA optimize;")
+            .execute(&self.pool)
+            .await
+            .context("Failed to run PRAGMA optimize on inventory DB")?;
+        Ok(())
+    }
+
+    /// Rewrite the database file to reclaim free pages after large deletes.
+    /// Takes an exclusive lock and rewrites the entire file — slow on large
+    /// DBs (minutes for a multi-GB file). The maintenance scheduler runs this
+    /// on a longer cadence than the prune/checkpoint cycle.
+    pub async fn vacuum(&self) -> Result<()> {
+        // VACUUM cannot run inside a transaction and must be issued on its own
+        // statement. SQLx handles the single-statement case fine.
+        sqlx::query("VACUUM;")
+            .execute(&self.pool)
+            .await
+            .context("Failed to VACUUM inventory DB")?;
+        Ok(())
+    }
+}
+
+/// Result of a maintenance prune cycle.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PruneStats {
+    pub snapshots_deleted: u64,
 }
 
 #[derive(Debug, FromRow)]
@@ -3380,10 +3497,18 @@ mod tests {
             .await
             .expect("in-memory sqlite");
 
-        sqlx::migrate!("./migrations")
+        // Apply the inventory-DB migrations so the in-memory pool mirrors
+        // the schema `InventoryRepository` targets in production (dedicated
+        // inventory DB: nullable `raw_payload`, `schema_meta`,
+        // `group_update_schedules` without FK). The main application
+        // migrations are deliberately not run here — these tests exercise
+        // only the inventory repository, so the inventory schema alone is
+        // enough and avoids SQLx's "VersionMissing" check when the two
+        // migration sets share a `_sqlx_migrations` table on one pool.
+        sqlx::migrate!("./migrations/inventory")
             .run(&pool)
             .await
-            .expect("migrations");
+            .expect("inventory migrations");
 
         let repo = InventoryRepository::new(pool);
         let payload = InventoryPayload {
@@ -3526,10 +3651,18 @@ mod tests {
             .await
             .expect("in-memory sqlite");
 
-        sqlx::migrate!("./migrations")
+        // Apply the inventory-DB migrations so the in-memory pool mirrors
+        // the schema `InventoryRepository` targets in production (dedicated
+        // inventory DB: nullable `raw_payload`, `schema_meta`,
+        // `group_update_schedules` without FK). The main application
+        // migrations are deliberately not run here — these tests exercise
+        // only the inventory repository, so the inventory schema alone is
+        // enough and avoids SQLx's "VersionMissing" check when the two
+        // migration sets share a `_sqlx_migrations` table on one pool.
+        sqlx::migrate!("./migrations/inventory")
             .run(&pool)
             .await
-            .expect("migrations");
+            .expect("inventory migrations");
 
         let repo = InventoryRepository::new(pool);
         let job = repo
@@ -3602,10 +3735,18 @@ mod tests {
             .await
             .expect("in-memory sqlite");
 
-        sqlx::migrate!("./migrations")
+        // Apply the inventory-DB migrations so the in-memory pool mirrors
+        // the schema `InventoryRepository` targets in production (dedicated
+        // inventory DB: nullable `raw_payload`, `schema_meta`,
+        // `group_update_schedules` without FK). The main application
+        // migrations are deliberately not run here — these tests exercise
+        // only the inventory repository, so the inventory schema alone is
+        // enough and avoids SQLx's "VersionMissing" check when the two
+        // migration sets share a `_sqlx_migrations` table on one pool.
+        sqlx::migrate!("./migrations/inventory")
             .run(&pool)
             .await
-            .expect("migrations");
+            .expect("inventory migrations");
 
         let repo = InventoryRepository::new(pool);
         let certnames = vec![

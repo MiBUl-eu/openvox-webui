@@ -13,6 +13,7 @@ pub mod cve_feed;
 pub mod cve_scheduler;
 pub mod facter;
 pub mod git;
+pub mod inventory_maintenance;
 pub mod inventory_scheduler;
 pub mod node_removal_scheduler;
 pub mod notification;
@@ -42,6 +43,7 @@ pub use code_deploy_scheduler::{start_code_deploy_scheduler, CodeDeployScheduler
 pub use cve_scheduler::{start_cve_scheduler, CveSchedulerState};
 pub use facter::{ExportFormat, FacterService, GeneratedFacts};
 pub use git::{BranchInfo, CommitInfo, GitService, GitServiceConfig};
+pub use inventory_maintenance::{start_inventory_maintenance, InventoryMaintenanceState};
 pub use inventory_scheduler::{start_inventory_scheduler, InventorySchedulerState};
 pub use node_removal_scheduler::{start_node_removal_scheduler, NodeRemovalSchedulerState};
 pub use notification::{NotificationEvent, NotificationService};

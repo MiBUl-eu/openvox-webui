@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING (deployment):** Inventory data (Phase-10 snapshots, packages, applications, containers, users, update jobs, repository configs, group update schedules) now lives in a dedicated SQLite database at `/var/lib/openvox-webui/inventory.db` instead of the main application DB. On first start of this version, a one-shot migrator moves existing inventory rows out of the main DB, truncates the legacy tables, and schedules a background `VACUUM` to reclaim disk. Inventory endpoints return 503 until the migration completes. Motivation: production incidents where SQLite write-lock contention under heavy Puppet-agent inventory POSTs blocked all UI reads and caused the service to exceed its cgroup memory soft limit.
+- `InventoryConfig` gained `database_url`, `keep_raw_payload`, `snapshot_retention_per_node`, `maintenance_interval_secs`, and `vacuum_interval_secs` knobs. All default to sensible values; existing deployments do not need to change their config.
+- Packaged systemd unit raises `MemoryHigh=3G` / `MemoryMax=6G` (was 1G/2G) to give the service room for SQLite page cache plus request buffers at realistic fleet sizes. `StartLimitIntervalSec` / `StartLimitBurst` moved from `[Service]` to `[Unit]` to silence systemd warnings.
+- `host_inventory_snapshots.raw_payload` is now written as NULL by default. Set `inventory.keep_raw_payload: true` to restore the legacy behavior. The normalized per-item tables carry everything the UI reads.
+
 ### Added
+- New inventory maintenance scheduler that periodically prunes snapshots past the retention policy, checkpoints the WAL, and runs `PRAGMA optimize`. A longer-cadence job runs `VACUUM` on the inventory DB.
+- `--reset-inventory-migration` CLI flag to clear the migration marker and force the one-shot migrator to run again on next startup.
+- `AppState::inventory_repository()` helper so handlers can construct an `InventoryRepository` bound to the correct pool + config without threading those through every call site.
 - Phase 10.6 update orchestration foundation with persisted update jobs, approval workflow, node polling/result APIs, and frontend client types for update operations
 - Phase 10.5 fleet inventory dashboard reporting with compliance, patch age, platform distribution, and top outdated software analytics
 - Phase 10.4 inventory intelligence with scheduled version catalog refresh, stale inventory detection, per-node outdated status, and inventory summary/catalog APIs

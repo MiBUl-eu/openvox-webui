@@ -73,6 +73,72 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to initialize database")?;
 
+    // Initialize the dedicated inventory database pool. Inventory data
+    // (Phase-10 snapshots, packages, applications, update jobs, repo
+    // configs, …) lives here so high-write ingestion does not starve the
+    // main DB's UI readers under SQLite's single-writer model.
+    let (inventory_db, inventory_config_full) = {
+        let inv_cfg = config
+            .inventory
+            .clone()
+            .unwrap_or_else(openvox_webui::config::InventoryConfig::default);
+        info!("Initializing inventory database: {}", inv_cfg.database_url);
+        let pool = db::init_inventory_pool(&inv_cfg.database_url, &config.database)
+            .await
+            .context("Failed to initialize inventory database")?;
+        (pool, inv_cfg)
+    };
+
+    // Handle --reset-inventory-migration before running the migrator, so
+    // operators can force a re-run.
+    if args.iter().any(|arg| arg == "--reset-inventory-migration") {
+        match db::inventory_migration::reset_marker(&inventory_db).await {
+            Ok(true) => {
+                info!("Reset inventory migration marker; migrator will run again on next startup")
+            }
+            Ok(false) => info!("No inventory migration marker present; nothing to reset"),
+            Err(e) => warn!("Failed to reset inventory migration marker: {}", e),
+        }
+    }
+
+    // Run the one-shot migrator that moves legacy inventory data from the
+    // main DB into the new inventory DB. Idempotent via a marker in
+    // `inventory.schema_meta`; returns quickly on subsequent boots.
+    let inventory_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let main_pool = db.clone();
+        let inv_pool = inventory_db.clone();
+        let inv_url = inventory_config_full.database_url.clone();
+        let ready_flag = inventory_ready.clone();
+        // Run on the startup task so the HTTP listener is still bound early
+        // and `/api/v1/health` stays responsive. The migrator is gated by
+        // `AppState::inventory_ready` so inventory endpoints return 503
+        // until it finishes.
+        tokio::spawn(async move {
+            match db::inventory_migration::migrate_if_needed(&main_pool, &inv_pool, &inv_url).await
+            {
+                Ok(report) => {
+                    if report.skipped {
+                        info!("Inventory migration: marker already set; skipping");
+                    } else {
+                        info!(
+                            "Inventory migration finished: {} rows copied, {} deleted from main",
+                            report.total_rows_copied, report.total_rows_deleted
+                        );
+                    }
+                    ready_flag.store(true, std::sync::atomic::Ordering::Release);
+                }
+                Err(e) => {
+                    warn!(
+                        "Inventory migration failed: {}. Inventory endpoints will return 503 \
+                         until this succeeds; restart to retry.",
+                        e
+                    );
+                }
+            }
+        });
+    }
+
     // Initialize PuppetDB client if configured
     let puppetdb = if let Some(ref puppetdb_config) = config.puppetdb {
         info!("Initializing PuppetDB client: {}", puppetdb_config.url);
@@ -222,7 +288,7 @@ async fn main() -> Result<()> {
     let _inventory_scheduler = if let Some(ref inventory_cfg) = inventory_config {
         info!("Starting Inventory scheduler");
         Some(services::start_inventory_scheduler(
-            db.clone(),
+            inventory_db.clone(),
             inventory_cfg.clone(),
         ))
     } else {
@@ -233,7 +299,7 @@ async fn main() -> Result<()> {
         if inventory_cfg.repo_check_enabled {
             info!("Starting Repository Checker scheduler");
             Some(services::start_repo_checker_scheduler(
-                db.clone(),
+                inventory_db.clone(),
                 inventory_cfg.clone(),
             ))
         } else {
@@ -242,6 +308,18 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    // Inventory maintenance (prune old snapshots, checkpoint WAL, VACUUM)
+    // always runs on the dedicated inventory DB. Without this the DB grows
+    // unboundedly as agents submit daily snapshots.
+    info!(
+        "Starting Inventory maintenance scheduler (retention: {}/node, interval: {}s, vacuum: {}s)",
+        inventory_config_full.snapshot_retention_per_node,
+        inventory_config_full.maintenance_interval_secs,
+        inventory_config_full.vacuum_interval_secs
+    );
+    let _inventory_maintenance =
+        services::start_inventory_maintenance(inventory_db.clone(), inventory_config_full.clone());
 
     // Initialize notification service
     info!("Initializing notification service");
@@ -267,14 +345,20 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Start Update Schedule scheduler (always enabled)
+    // Start Update Schedule scheduler (always enabled). It coordinates across
+    // both databases: reads `node_groups` from the main DB and creates
+    // `update_jobs` in the inventory DB.
     info!("Starting Update Schedule scheduler");
-    let _update_schedule_scheduler = services::start_update_schedule_scheduler(db.clone());
+    let _update_schedule_scheduler =
+        services::start_update_schedule_scheduler(db.clone(), inventory_db.clone());
 
     // Create application state
     let state = AppState {
         config: config.clone(),
         db,
+        inventory_db,
+        inventory_config: inventory_config_full,
+        inventory_ready,
         puppetdb,
         puppet_ca,
         rbac,
@@ -722,6 +806,13 @@ OPTIONS:
                             Check r10k directory permissions and show commands
                             to fix them. Run this if Code Deploy fails with
                             "Read-only file system" errors.
+    --reset-inventory-migration
+                            Clear the `inventory_migrated_from_main` marker in
+                            the inventory database so the one-shot migrator
+                            runs again on next startup. Use this to recover
+                            after a failed migration, or to re-run the copy
+                            if legacy inventory data was written to the main
+                            DB by an older binary.
 
 ENVIRONMENT:
     OPENVOX_CONFIG      Path to configuration file (default: config.yaml)

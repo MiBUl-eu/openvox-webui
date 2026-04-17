@@ -1205,6 +1205,51 @@ pub struct InventoryConfig {
     /// Maximum concurrent repository checks
     #[serde(default = "default_repo_check_max_concurrent")]
     pub repo_check_max_concurrent: usize,
+
+    /// SQLite URL for the dedicated inventory database. Defaults to
+    /// `sqlite:///var/lib/openvox-webui/inventory.db`. Inventory data lives in
+    /// its own SQLite file so high-write ingestion does not block the main
+    /// application database's readers. Override via config or env var.
+    #[serde(default = "default_inventory_database_url")]
+    pub database_url: String,
+
+    /// Keep the full JSON `raw_payload` column on `host_inventory_snapshots`
+    /// when ingesting an inventory POST. The normalized detail tables are
+    /// sufficient for the UI, and the raw payload can bloat the DB quickly.
+    /// Default: false (column is written as NULL).
+    #[serde(default)]
+    pub keep_raw_payload: bool,
+
+    /// How many snapshots to retain per certname after the maintenance job
+    /// prunes. 0 disables pruning (not recommended). Default: 10.
+    #[serde(default = "default_inventory_snapshot_retention")]
+    pub snapshot_retention_per_node: u32,
+
+    /// How often the maintenance job runs (prune + WAL checkpoint + PRAGMA
+    /// optimize). Default: 3600 (1 hour). Minimum clamp: 60s.
+    #[serde(default = "default_inventory_maintenance_interval_secs")]
+    pub maintenance_interval_secs: u64,
+
+    /// How often VACUUM runs on the inventory DB. 0 disables automatic VACUUM.
+    /// Default: 604800 (weekly). Minimum clamp: 3600s when non-zero.
+    #[serde(default = "default_inventory_vacuum_interval_secs")]
+    pub vacuum_interval_secs: u64,
+}
+
+fn default_inventory_database_url() -> String {
+    "sqlite:///var/lib/openvox-webui/inventory.db".to_string()
+}
+
+fn default_inventory_snapshot_retention() -> u32 {
+    10
+}
+
+fn default_inventory_maintenance_interval_secs() -> u64 {
+    3600
+}
+
+fn default_inventory_vacuum_interval_secs() -> u64 {
+    604_800
 }
 
 fn default_inventory_catalog_refresh_interval_secs() -> u64 {
@@ -1242,6 +1287,11 @@ impl Default for InventoryConfig {
             repo_check_interval_secs: default_repo_check_interval_secs(),
             repo_check_timeout_secs: default_repo_check_timeout_secs(),
             repo_check_max_concurrent: default_repo_check_max_concurrent(),
+            database_url: default_inventory_database_url(),
+            keep_raw_payload: false,
+            snapshot_retention_per_node: default_inventory_snapshot_retention(),
+            maintenance_interval_secs: default_inventory_maintenance_interval_secs(),
+            vacuum_interval_secs: default_inventory_vacuum_interval_secs(),
         }
     }
 }

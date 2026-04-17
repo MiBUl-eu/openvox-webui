@@ -538,9 +538,10 @@ async fn saml_acs(State(state): State<AppState>, Form(form): Form<SamlAcsForm>) 
     tracing::debug!("User roles: {:?}", roles);
 
     let session_id = Uuid::new_v4();
-    let session_expires_at = Utc::now()
-        + Duration::days(state.config.auth.refresh_token_expiry_days as i64);
-    if let Err(e) = create_auth_session(&state.db, &session_id, &user.id, session_expires_at).await {
+    let session_expires_at =
+        Utc::now() + Duration::days(state.config.auth.refresh_token_expiry_days as i64);
+    if let Err(e) = create_auth_session(&state.db, &session_id, &user.id, session_expires_at).await
+    {
         tracing::error!("Failed to create SAML auth session: {:?}", e);
         let error = SamlErrorPage {
             error: "Internal Error".to_string(),
